@@ -28,6 +28,52 @@ enum
 #define GB_WIDTH   320
 #define GB_HEIGHT  200
 
+/* Coordinates are (DOOM X, height, DOOM Y), in map units.  Screen positions
+ * and motion are full 320x200-buffer pixels, including the viewport offset.
+ * Camera snapshots own every value; globals restored for UI are not frame data. */
+typedef struct {
+    float position[3];
+    unsigned int yaw;
+    float forward_cos, forward_sin;
+    float center_x, center_y, projection;
+} GB_CameraSample;
+
+enum {
+    GB_RESET_INITIAL = 1, GB_RESET_SCENE = 2, GB_RESET_VIEW = 4,
+    GB_RESET_TELEPORT = 8, GB_RESET_LOAD = 16, GB_RESET_LEVEL = 32,
+    GB_RESET_MENU = 64, GB_RESET_PAUSE = 128, GB_RESET_CAMERA_CUT = 256,
+    GB_RESET_EXPLICIT = 512
+};
+typedef struct {
+    unsigned int frame_id;
+    int game_tic, map_episode, map_number, scene_valid, history_valid, fixed_timeline;
+    int viewport_x, viewport_y, viewport_width, viewport_height, detail_shift;
+    int render_width, render_height, output_width, output_height;
+    GB_CameraSample base, sampled;
+    /* Actual fine-table rays per unit GB depth, not normalized ray distance.
+     * Column and plane row sampling differ in the original software renderer. */
+    float ray_x[GB_WIDTH], ray_z[GB_WIDTH];
+    float ray_up_column[GB_HEIGHT], ray_up_plane[GB_HEIGHT];
+    float jitter_x, jitter_y, frame_delta_ms;
+    unsigned int reset_reasons;
+} GB_FrameInputs;
+
+void GB_BeginScene(void);
+void GB_CaptureSampling(float jitter_x, float jitter_y);
+void GB_SetFrameTiming(int game_tic, float delta_ms, int fixed_timeline,
+                       int menu_open, int paused, int map_episode, int map_number);
+void GB_RequestResetReason(unsigned int reasons);
+const GB_FrameInputs *GB_GetFrameInputs(void);
+const unsigned char *GB_SurfaceKind(void);
+/* Reject padding/sky/2D pixels. Ray vector is in Y-up world coordinates. */
+int GB_SampleRay(int screen_x, int screen_y, float ray_world[3]);
+int GB_SampleWorldPosition(int screen_x, int screen_y, float world[3]);
+/* Analytic current->previous, jitter-free low-resolution pixel displacement.
+ * World positions are current and previous positions of the same surface. */
+int GB_ProjectMotion(const GB_FrameInputs *current, const GB_FrameInputs *previous,
+                     const float current_world[3], const float previous_world[3],
+                     float motion[2]);
+
 void GB_Init(void);
 void GB_Shutdown(void);
 

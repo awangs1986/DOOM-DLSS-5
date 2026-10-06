@@ -2,6 +2,7 @@
 #include "gbuffer.h"
 
 #include <math.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -17,6 +18,7 @@ static unsigned char gb_color[GB_PIX * 4];
 static unsigned char gb_scene8[GB_PIX];
 static unsigned char gb_overlay_color[GB_PIX * 4];
 static unsigned char gb_scene_mask[GB_PIX];
+static unsigned char gb_surface_kind[GB_PIX];
 static unsigned char gb_overlay_mask[GB_PIX];
 static int gb_scene_captured;
 static int gb_overlay_drawing;
@@ -36,17 +38,17 @@ static int   gb_debug_view = GB_VIEW_COLOR;
 static int   gb_hud_visible = 1;
 static int   gb_reset;
 
-static int     gb_have_prev;
-static fixed_t gb_prev_viewx;
-static fixed_t gb_prev_viewy;
-static fixed_t gb_prev_viewz;
-static angle_t gb_prev_viewangle;
+static int gb_have_prev, gb_menu_open, gb_paused, gb_have_state;
+static int gb_col_kind;
+static GB_FrameInputs gb_frame, gb_previous;
+static unsigned int gb_pending_reset;
 
 static void gb_clear_aux(void)
 {
     int i;
 
     memset(gb_scene_mask, 0, sizeof(gb_scene_mask));
+    memset(gb_surface_kind, GB_KIND_SKY, sizeof(gb_surface_kind));
     memset(gb_depth, 0, sizeof(gb_depth));
     memset(gb_normal, 0, sizeof(gb_normal));
     memset(gb_velocity, 0, sizeof(gb_velocity));
@@ -64,6 +66,10 @@ void GB_Init(void)
     memset(gb_overlay_mask, 0, sizeof(gb_overlay_mask));
     gb_have_prev = 0;
     gb_reset = 1;
+    gb_pending_reset = GB_RESET_INITIAL;
+    memset(&gb_frame, 0, sizeof(gb_frame));
+    memset(&gb_previous, 0, sizeof(gb_previous));
+    gb_have_state = 0;
     gb_debug_view = GB_VIEW_COLOR;
     gb_hud_visible = 1;
     gb_col_du = 0.0f;
@@ -87,6 +93,7 @@ void GB_BeginDisplay(void)
 {
     gb_scene_captured = 0;
     gb_overlay_drawing = 0;
+    gb_frame.scene_valid = 0;
     memset(gb_overlay_mask, 0, sizeof(gb_overlay_mask));
 }
 
@@ -94,6 +101,7 @@ void GB_InvalidateScene(void)
 {
     gb_scene_captured = 0;
     gb_overlay_drawing = 0;
+    gb_frame.scene_valid = 0;
     memset(gb_overlay_mask, 0, sizeof(gb_overlay_mask));
     gb_clear_aux();
 }
@@ -117,7 +125,7 @@ void GB_MarkOverlayRect(int x, int y, int width, int height)
 
 void GB_SetColumn(int x, float z, float nx, float ny, float nz, int kind)
 {
-    (void)kind;
+    gb_col_kind = kind;
     gb_col_x = x;
     gb_col_z = z;
     gb_col_nx = nx;
@@ -135,7 +143,13 @@ void GB_SetObjectMotion(float du, float dv)
 
 void GB_RequestReset(void)
 {
+    GB_RequestResetReason(GB_RESET_EXPLICIT);
+}
+
+void GB_RequestResetReason(unsigned int reasons)
+{
     gb_reset = 1;
+    gb_pending_reset |= reasons;
     gb_have_prev = 0;
 }
 
@@ -172,6 +186,7 @@ static void gb_write_pixel(int x, int y, float z, float nx, float ny, float nz)
     i = y * GB_WIDTH + x;
     gb_scene_mask[i] = z > 0.0f && z < GB_FAR_Z;
     gb_depth[i] = z;
+    gb_surface_kind[i] = (unsigned char)gb_col_kind;
     gb_obj_du[i] = gb_col_du;
     gb_obj_dv[i] = gb_col_dv;
 
@@ -227,6 +242,7 @@ void GB_WriteSpan(int y, int x1, int x2, float z, float nx, float ny, float nz)
     }
     gb_col_du = 0.0f;
     gb_col_dv = 0.0f;
+    gb_col_kind = ny > 0 ? GB_KIND_FLOOR : GB_KIND_CEILING;
     sy = gb_screen_y(y);
     for (x = x1; x <= x2; x++)
 	gb_write_pixel(gb_screen_x(x), sy, z, nx, ny, nz);
@@ -285,115 +301,119 @@ void GB_CaptureScene(const unsigned char *src8)
     gb_overlay_drawing = 1;
 }
 
+static void gb_capture_camera(GB_CameraSample *camera)
+{
+    camera->position[0] = (float)viewx / FRACUNIT;
+    camera->position[1] = (float)viewz / FRACUNIT;
+    camera->position[2] = (float)viewy / FRACUNIT;
+    camera->yaw = viewangle;
+    camera->forward_cos = (float)cos(gb_bam_to_rad(viewangle));
+    camera->forward_sin = (float)sin(gb_bam_to_rad(viewangle));
+    camera->center_x = (float)centerx;
+    camera->center_y = (float)centeryfrac / FRACUNIT;
+    camera->projection = (float)projection / FRACUNIT;
+}
+
+void GB_BeginScene(void)
+{
+    gb_capture_camera(&gb_frame.base);
+}
+
+void GB_CaptureSampling(float jitter_x, float jitter_y)
+{
+    int x, y;
+    gb_capture_camera(&gb_frame.sampled);
+    gb_frame.viewport_x = gb_screen_x(0);
+    gb_frame.viewport_y = gb_screen_y(0);
+    gb_frame.viewport_width = viewwidth;
+    gb_frame.viewport_height = viewheight;
+    gb_frame.detail_shift = detailshift;
+    gb_frame.render_width = GB_WIDTH; gb_frame.render_height = GB_HEIGHT;
+    gb_frame.output_width = GB_WIDTH * 4; gb_frame.output_height = GB_HEIGHT * 4;
+    gb_frame.jitter_x = jitter_x; gb_frame.jitter_y = jitter_y;
+    for (x = 0; x < viewwidth && x < GB_WIDTH; x++) {
+        unsigned angle = (viewangle + xtoviewangle[x]) >> ANGLETOFINESHIFT;
+        float scale = (float)distscale[x] / FRACUNIT;
+        gb_frame.ray_x[x] = (float)finecosine[angle] / FRACUNIT * scale;
+        gb_frame.ray_z[x] = (float)finesine[angle] / FRACUNIT * scale;
+    }
+    for (y = 0; y < viewheight && y < GB_HEIGHT; y++) {
+        float up = gb_frame.sampled.center_y - (float)y;
+        gb_frame.ray_up_column[y] = up / gb_frame.sampled.projection;
+        gb_frame.ray_up_plane[y] = (up > 0.5f ? 1.0f : -1.0f) /
+                                   ((float)yslope[y] / FRACUNIT);
+    }
+}
+
+void GB_SetFrameTiming(int game_tic, float delta_ms, int fixed_timeline,
+                       int menu_open, int paused_now, int map_episode, int map_number)
+{
+    gb_frame.game_tic = game_tic;
+    gb_frame.map_episode = map_episode; gb_frame.map_number = map_number;
+    gb_frame.frame_delta_ms = delta_ms;
+    gb_frame.fixed_timeline = fixed_timeline;
+    if (gb_have_state && menu_open != gb_menu_open) GB_RequestResetReason(GB_RESET_MENU);
+    if (gb_have_state && paused_now != gb_paused) GB_RequestResetReason(GB_RESET_PAUSE);
+    gb_menu_open = menu_open; gb_paused = paused_now; gb_have_state = 1;
+}
+
+const GB_FrameInputs *GB_GetFrameInputs(void) { return &gb_frame; }
+const unsigned char *GB_SurfaceKind(void) { return gb_surface_kind; }
+
+int GB_SampleRay(int screen_x, int screen_y, float ray_world[3])
+{
+    int i, x = screen_x - gb_frame.viewport_x, y = screen_y - gb_frame.viewport_y;
+    if (!ray_world || !gb_frame.scene_valid || (unsigned)screen_x >= GB_WIDTH ||
+        (unsigned)screen_y >= GB_HEIGHT || x < 0 || y < 0 ||
+        x >= gb_frame.viewport_width || y >= gb_frame.viewport_height) return 0;
+    i = screen_y * GB_WIDTH + screen_x;
+    if (!gb_scene_mask[i]) return 0;
+    ray_world[0] = gb_frame.ray_x[x]; ray_world[2] = gb_frame.ray_z[x];
+    ray_world[1] = (gb_surface_kind[i] == GB_KIND_FLOOR || gb_surface_kind[i] == GB_KIND_CEILING) ?
+                   gb_frame.ray_up_plane[y] : gb_frame.ray_up_column[y];
+    return 1;
+}
+
+int GB_SampleWorldPosition(int x, int y, float world[3])
+{
+    float ray[3]; int c;
+    if (!world || !GB_SampleRay(x, y, ray)) return 0;
+    for (c = 0; c < 3; c++) world[c] = gb_frame.sampled.position[c] + ray[c] * gb_depth[y * GB_WIDTH + x];
+    return 1;
+}
+
 void GB_EndFrame(void)
 {
     int x, y;
-    int x0, y0, x1, y1;
-    float cur_x, cur_y, cur_z;
-    float prev_x, prev_y, prev_z;
-    float cur_c, cur_s, prev_c, prev_s;
-    float proj;
-
-    if (!gb_scene_captured) {
-        gb_have_prev = 0;
-        return;
+    gb_frame.frame_id++;
+    gb_frame.scene_valid = gb_scene_captured;
+    if (!gb_scene_captured) gb_have_prev = 0;
+    if (gb_have_prev) {
+        float dx = gb_frame.base.position[0] - gb_previous.base.position[0];
+        float dz = gb_frame.base.position[1] - gb_previous.base.position[1];
+        float dy = gb_frame.base.position[2] - gb_previous.base.position[2];
+        int32_t yaw_delta = (int32_t)(gb_frame.base.yaw - gb_previous.base.yaw);
+        if (dx * dx + dy * dy + dz * dz > 128.0f * 128.0f ||
+            fabs((double)yaw_delta) > 1073741824.0 || gb_frame.game_tic < gb_previous.game_tic ||
+            gb_frame.frame_delta_ms > 250.0f) GB_RequestResetReason(GB_RESET_CAMERA_CUT);
+        if (gb_frame.viewport_x != gb_previous.viewport_x || gb_frame.viewport_y != gb_previous.viewport_y ||
+            gb_frame.viewport_width != gb_previous.viewport_width || gb_frame.viewport_height != gb_previous.viewport_height)
+            GB_RequestResetReason(GB_RESET_VIEW);
     }
-    gb_view_rect(&x0, &y0, &x1, &y1);
-    cur_x = (float)viewx / 65536.0f;
-    cur_y = (float)viewy / 65536.0f;
-    cur_z = (float)viewz / 65536.0f;
-    cur_c = (float)cos(gb_bam_to_rad(viewangle));
-    cur_s = (float)sin(gb_bam_to_rad(viewangle));
-    proj = (float)projection / 65536.0f;
-    if (proj < 1.0f)
-	proj = (float)centerx;
-
-    if (gb_have_prev)
-    {
-	prev_x = (float)gb_prev_viewx / 65536.0f;
-	prev_y = (float)gb_prev_viewy / 65536.0f;
-	prev_z = (float)gb_prev_viewz / 65536.0f;
-	prev_c = (float)cos(gb_bam_to_rad(gb_prev_viewangle));
-	prev_s = (float)sin(gb_bam_to_rad(gb_prev_viewangle));
-
-	for (y = 0; y < GB_HEIGHT; y++)
-	{
-	    for (x = 0; x < GB_WIDTH; x++)
-	    {
-		int i = y * GB_WIDTH + x;
-		int vx = x - x0;
-		int vy = y - y0;
-		float z = gb_depth[i];
-		angle_t ray;
-		float rc, rs;
-		float wx, wy, wz;
-		float relx, rely, relz;
-		float vz, vxcam;
-		float prev_sx, prev_sy;
-
-		if (x < x0 || x > x1 || y < y0 || y > y1)
-		{
-		    gb_velocity[i * 2 + 0] = 0.0f;
-		    gb_velocity[i * 2 + 1] = 0.0f;
-		    continue;
-		}
-		if (z <= 0.0f || z >= GB_FAR_Z)
-		{
-		    gb_velocity[i * 2 + 0] = 0.0f;
-		    gb_velocity[i * 2 + 1] = 0.0f;
-		    continue;
-		}
-		if ((unsigned)vx >= (unsigned)SCREENWIDTH)
-		{
-		    gb_velocity[i * 2 + 0] = 0.0f;
-		    gb_velocity[i * 2 + 1] = 0.0f;
-		    continue;
-		}
-
-		/* gb_depth is the view-axis depth (projection / scale), so the
-		   distance along the ray is z / cos(column angle). */
-		ray = viewangle + xtoviewangle[vx];
-		rc = (float)cos(gb_bam_to_rad(ray));
-		rs = (float)sin(gb_bam_to_rad(ray));
-		{
-		    float ct = (float)cos(gb_bam_to_rad(xtoviewangle[vx]));
-		    float d = (ct > 0.01f) ? z / ct : z;
-		    wx = cur_x + rc * d;
-		    wy = cur_y + rs * d;
-		}
-		wz = cur_z + ((float)(centery - vy) * z) / proj;
-
-		relx = wx - prev_x;
-		rely = wy - prev_y;
-		relz = wz - prev_z;
-		vz = relx * prev_c + rely * prev_s;
-		vxcam = -relx * prev_s + rely * prev_c;
-		if (vz < 1.0f)
-		{
-		    gb_velocity[i * 2 + 0] = 0.0f;
-		    gb_velocity[i * 2 + 1] = 0.0f;
-		    continue;
-		}
-
-		/* vxcam is positive to the LEFT (DOOM angles grow CCW,
-		   xtoviewangle[0] is the left edge), so it moves screen x down. */
-		prev_sx = (float)centerx - vxcam * (proj / vz);
-		prev_sy = (float)centery - relz * (proj / vz);
-		/* NGX / FSR2 convention: vector from the current pixel to where
-		   it was in the previous frame (prev - cur), low-res pixels. */
-		gb_velocity[i * 2 + 0] = prev_sx - (float)vx + gb_obj_du[i];
-		gb_velocity[i * 2 + 1] = prev_sy - (float)vy + gb_obj_dv[i];
-	    }
-	}
+    gb_frame.history_valid = gb_have_prev;
+    gb_frame.reset_reasons = gb_pending_reset;
+    gb_pending_reset = 0;
+    memset(gb_velocity, 0, sizeof(gb_velocity));
+    if (gb_have_prev) for (y = 0; y < GB_HEIGHT; y++) for (x = 0; x < GB_WIDTH; x++) {
+        int i = y * GB_WIDTH + x;
+        float world[3], motion[2];
+        if (GB_SampleWorldPosition(x, y, world) && GB_ProjectMotion(&gb_frame, &gb_previous, world, world, motion)) {
+            int tics = gb_frame.game_tic - gb_previous.game_tic;
+            gb_velocity[i * 2] = motion[0] + gb_obj_du[i] * tics;
+            gb_velocity[i * 2 + 1] = motion[1] + gb_obj_dv[i] * tics;
+        }
     }
-
-    (void)cur_c;
-    (void)cur_s;
-    gb_prev_viewx = viewx;
-    gb_prev_viewy = viewy;
-    gb_prev_viewz = viewz;
-    gb_prev_viewangle = viewangle;
-    gb_have_prev = 1;
+    if (gb_scene_captured) { gb_previous = gb_frame; gb_have_prev = 1; }
 }
 
 void GB_SetPaletteRGB(const unsigned char *rgb768)
@@ -405,7 +425,7 @@ void GB_ConvertColor(const unsigned char *src8)
 {
     int i;
     const unsigned char *scene = gb_scene_captured ? gb_scene8 : src8;
-    if (gb_last_scene != gb_scene_captured) GB_RequestReset();
+    if (gb_last_scene != gb_scene_captured) GB_RequestResetReason(GB_RESET_SCENE);
     gb_last_scene = gb_scene_captured;
     if (!gb_scene_captured) gb_clear_aux();
     for (i = 0; i < GB_PIX; i++) {
@@ -426,6 +446,7 @@ void GB_SetDebugView(int view)
 	view = GB_VIEW_COLOR;
     if (view > GB_VIEW_OVERLAY_MASK)
         view = GB_VIEW_OVERLAY_MASK;
+    if (gb_debug_view != view) GB_RequestResetReason(GB_RESET_VIEW);
     gb_debug_view = view;
 }
 

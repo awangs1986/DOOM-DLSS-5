@@ -30,6 +30,7 @@
 #include "gpu_timing.h"
 #include "dxr_diagnostic.h"
 #include "render_adapter.h"
+#include "frame_trace.h"
 
 extern int viewheight;
 extern boolean singletics;
@@ -91,6 +92,7 @@ static float g_vel_hi[WIN_W * WIN_H * 2];
 /* -export <dir>: every presented frame -> <dir>\fNNNNNN.png */
 static const char *g_export_dir;
 static int g_export_frame;
+static LARGE_INTEGER g_frame_frequency, g_frame_last;
 static unsigned char g_export_bgr[WIN_W * WIN_H * 3];
 
 static int xlatekey(WPARAM vk)
@@ -953,6 +955,16 @@ void I_FinishUpdate(void)
     int used_fsr2 = 0;
     int reset;
 
+    {
+        LARGE_INTEGER now;
+        float delta_ms;
+        QueryPerformanceCounter(&now);
+        delta_ms = g_frame_last.QuadPart ? (float)(1000.0 * (double)(now.QuadPart - g_frame_last.QuadPart) / g_frame_frequency.QuadPart) : 1000.0f / TICRATE;
+        g_frame_last = now;
+        if (singletics) delta_ms = 1000.0f / TICRATE;
+        if (delta_ms <= 0.0f) delta_ms = 0.001f;
+        GB_SetFrameTiming(gametic, delta_ms, singletics != 0, menuactive != 0, paused != 0, gameepisode, gamemap);
+    }
     GB_ConvertColor(screens[0]);
     GB_EndFrame();
     reset = GB_ConsumeReset();
@@ -1072,6 +1084,7 @@ void I_FinishUpdate(void)
     Ngx_RecordPresented(used_ngx, used_fsr2 ? "fsr2" :
                         (used_a4k ? "anime4k-fast" : "nearest"));
 
+    FrameTrace_Record(used_ngx, used_fsr2);
     GpuTiming_Mark(g_cmd, 2);
     if (used_ngx || used_a4k || used_fsr2)
     {
@@ -1194,6 +1207,7 @@ void I_ShutdownGraphics(void)
 	DestroyWindow(g_hwnd);
 	g_hwnd = NULL;
     }
+    FrameTrace_Shutdown();
     GB_Shutdown();
 }
 
@@ -1203,7 +1217,13 @@ void I_InitGraphics(void)
     RECT rc;
     DWORD style;
 
+    QueryPerformanceFrequency(&g_frame_frequency);
+    g_frame_last.QuadPart = 0;
     GB_Init();
+    {
+        int p = M_CheckParm("-frame-inputs");
+        if (p && p + 1 < myargc) FrameTrace_Init(myargv[p + 1]);
+    }
     if (M_CheckParm("-depth"))
 	GB_SetDebugView(GB_VIEW_DEPTH);
     else if (M_CheckParm("-normal"))

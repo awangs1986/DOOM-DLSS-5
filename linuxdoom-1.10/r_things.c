@@ -43,6 +43,7 @@ rcsid[] = "$Id: r_things.c,v 1.5 1997/02/03 16:47:56 b1 Exp $";
 
 #ifdef _WIN32
 #include "gbuffer.h"
+#include "fsr2.h"
 #include "v_video.h"
 
 static fixed_t vis_momx[MAXVISSPRITES];
@@ -1063,6 +1064,8 @@ void R_DrawMasked (void)
     /* The world behind the weapon is genuinely rendered before this boundary.
      * Subsequent column/patch writes record explicit 2D coverage only. */
     GB_CaptureScene(screens[0]);
+    /* Frame rays are frozen; weapon/UI keep the unjittered projection. */
+    Fsr2_RestoreCamera();
 #endif
     // draw the psprites on top of everything
     //  but does not draw on side views

@@ -38,6 +38,9 @@ rcsid[] = "$Id: p_telept.c,v 1.3 1997/01/28 22:08:29 b1 Exp $";
 
 // State.
 #include "r_state.h"
+#ifdef _WIN32
+#include "gbuffer.h"
+#endif
 
 
 
@@ -121,6 +124,9 @@ EV_Teleport
 		if (thing->player)
 		    thing->reactiontime = 18;	
 
+#ifdef _WIN32
+                if (thing->player) GB_RequestResetReason(GB_RESET_TELEPORT);
+#endif
 		thing->angle = m->angle;
 		thing->momx = thing->momy = thing->momz = 0;
 		return 1;
