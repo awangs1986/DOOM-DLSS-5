@@ -179,6 +179,11 @@ if not exist "%SRC%" (
 )
 mkdir "%DEST%" 2>nul
 copy /Y "%SRC%" "%DEST%\windoom.exe" >nul
+if exist "%~dp0build-win\%CONFIG%\shaders\dxr_diagnostic.cso" (
+  mkdir "%DEST%\shaders" 2>nul
+  copy /Y "%~dp0build-win\%CONFIG%\shaders\dxr_diagnostic.cso" "%DEST%\shaders\dxr_diagnostic.cso" >nul
+  if errorlevel 1 exit /b 1
+)
 mkdir "%DEST%\languages" 2>nul
 copy /Y "%~dp0languages\*.ini" "%DEST%\languages\" >nul
 if errorlevel 1 exit /b 1

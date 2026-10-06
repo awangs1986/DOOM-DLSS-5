@@ -40,7 +40,10 @@ try {
     $result.error = $_.Exception.Message
 } finally {
     $result.endUtc = [DateTime]::UtcNow.ToString('o')
-    $result | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $PSScriptRoot 'worker-result.json') -Encoding UTF8
+    # Publish only a complete JSON result; the launcher polls for its existence.
+    $resultPath = Join-Path $PSScriptRoot 'worker-result.json'
+    $result | ConvertTo-Json | Set-Content -LiteralPath ($resultPath + '.tmp') -Encoding UTF8
+    Move-Item -LiteralPath ($resultPath + '.tmp') -Destination $resultPath
 }
 if (!$result.success) { exit 1 }
 '@ | Set-Content -LiteralPath (Join-Path $OutputRoot 'worker.ps1') -Encoding UTF8
@@ -59,8 +62,21 @@ try {
         if ([DateTime]::UtcNow -gt $deadline) { throw 'Interactive capture task timed out; inspect task status and transcript.' }
         $info = Get-ScheduledTaskInfo -TaskName $taskName
         $task = Get-ScheduledTask -TaskName $taskName
-        if ($task.State -eq 'Ready' -and $info.LastRunTime.Year -gt 2000 -and $info.LastTaskResult -ne 0) {
-            throw "Interactive task exited without a result (task result $($info.LastTaskResult)); inspect execution policy and logged-in session."
+        # State and Info are separate snapshots. 0x41301 means still running,
+        # even if the adjacent state snapshot briefly says Ready; 0x41303 means
+        # not yet run. Neither is a failed completion.
+        if ($task.State -eq 'Ready' -and $info.LastRunTime.Year -gt 2000 -and
+            $info.LastTaskResult -notin @(0, 0x41301, 0x41303)) {
+            if (Test-Path -LiteralPath $resultPath) { break }
+            Start-Sleep -Milliseconds 200
+            $confirmedInfo = Get-ScheduledTaskInfo -TaskName $taskName
+            $confirmedTask = Get-ScheduledTask -TaskName $taskName
+            if (Test-Path -LiteralPath $resultPath) { break }
+            if ($confirmedTask.State -eq 'Ready' -and
+                $confirmedInfo.LastRunTime -eq $info.LastRunTime -and
+                $confirmedInfo.LastTaskResult -eq $info.LastTaskResult) {
+                throw "Interactive task exited without a result (task result $($info.LastTaskResult)); inspect execution policy and logged-in session."
+            }
         }
         Start-Sleep -Seconds 2
     }
