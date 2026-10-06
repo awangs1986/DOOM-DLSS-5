@@ -23,13 +23,75 @@ function Write-Json($Value, [string]$Path) {
     $Value | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 function Get-Hash([string]$Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
+function Assert-NoReparsePath([string]$Path) {
+    # Inspect every existing component, including directory junctions. Never
+    # hash, copy, back up or publish through a link supplied by a local cache.
+    $component = [IO.Path]::GetFullPath($Path)
+    while ($component) {
+        $item = Get-Item -LiteralPath $component -Force -ErrorAction SilentlyContinue
+        if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Reparse/symbolic-link path is not supported: $component"
+        }
+        $parent = Split-Path -Parent $component
+        if ($parent -eq $component) { break }
+        $component = $parent
+    }
+}
+function Get-SafeTree([string]$Directory) {
+    Assert-NoReparsePath $Directory
+    # Walk one level at a time so a junction/symlink is rejected before descent.
+    foreach ($item in Get-ChildItem -LiteralPath $Directory -Force) {
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Reparse/symbolic-link SDK entry is not supported: $($item.FullName)"
+        }
+        $item
+        if ($item.PSIsContainer) { Get-SafeTree $item.FullName }
+    }
+}
+function Get-PinnedPath([string]$Directory, [string]$Relative) {
+    if ($Relative -match '(^[/\\]|(^|[/\\])\.\.?([/\\]|$)|:|[?*])') { throw 'Invalid pinned SDK path.' }
+    $path = Join-Path $Directory $Relative
+    Assert-NoReparsePath $path
+    return $path
+}
 function Test-Files([string]$Directory) {
     foreach ($f in $Release.files) {
-        $path = Join-Path $Directory $f.path
+        $path = Get-PinnedPath $Directory $f.path
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
         if ((Get-Item -LiteralPath $path).Length -ne $f.size -or (Get-Hash $path) -ne $f.sha256) { return $false }
     }
     return $true
+}
+function Test-InstalledInventory([string]$Directory) {
+    $allowed = @{ 'ngx-install.json' = $true }
+    foreach ($file in $Release.files) {
+        $relative = $file.path.Replace('\', '/')
+        $allowed[$relative] = $true
+        while ($relative.Contains('/')) {
+            $relative = $relative.Substring(0, $relative.LastIndexOf('/'))
+            $allowed[$relative] = $true
+        }
+    }
+    foreach ($item in Get-SafeTree $Directory) {
+        $relative = $item.FullName.Substring($Directory.Length + 1).Replace('\', '/')
+        if (-not $allowed.ContainsKey($relative)) {
+            Write-Host "Unexpected installed SDK entry; staging a pinned replacement: $relative"
+            return $false
+        }
+    }
+    return $true
+}
+function Copy-PinnedSdk([string]$Cache, [string]$Stage) {
+    # The stage starts empty. Cache extras, including receipts and alternate
+    # headers/libraries, never become part of the verified build include path.
+    New-Item -ItemType Directory -Path $Stage | Out-Null
+    foreach ($file in $Release.files) {
+        $source = Get-PinnedPath $Cache $file.path
+        $target = Get-PinnedPath $Stage $file.path
+        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+        Copy-Item -LiteralPath $source -Destination $target
+    }
+    if (-not (Test-Files $Stage)) { throw 'Pinned SDK staging checksum mismatch.' }
 }
 function Get-RuntimeInfo([string]$Path) {
     $stream = [IO.File]::OpenRead($Path)
@@ -76,8 +138,9 @@ function Get-File([string]$Path, [string]$Url) {
     }
 }
 function Assert-Unlocked([string]$Path) {
+    Assert-NoReparsePath $Path
     if (Test-Path -LiteralPath $Path -PathType Container) {
-        foreach ($file in Get-ChildItem -LiteralPath $Path -File -Recurse) { Assert-Unlocked $file.FullName }
+        foreach ($file in Get-SafeTree $Path | Where-Object { -not $_.PSIsContainer }) { Assert-Unlocked $file.FullName }
     } elseif (Test-Path -LiteralPath $Path -PathType Leaf) {
         # No forced overwrite: sharing violations abort before publication.
         $handle = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
@@ -86,13 +149,14 @@ function Assert-Unlocked([string]$Path) {
 }
 function Commit-Entries($Entries, [string]$Transaction) {
     $backup = Join-Path $CacheDirectory ('backups/' + [IO.Path]::GetFileName($Transaction))
-    New-Item -ItemType Directory -Path $backup -Force | Out-Null
+    Assert-NoReparsePath $backup
     $journal = @()
     foreach ($entry in $Entries) {
         $target = Join-Path $Root $entry.relative
         Assert-Unlocked $target
         $journal += [ordered]@{ relative = $entry.relative; existed = (Test-Path -LiteralPath $target); sha256 = $null; inventory = @() }
     }
+    New-Item -ItemType Directory -Path $backup -Force | Out-Null
     # All rollback material exists before the first target is changed.
     foreach ($item in $journal) {
         if ($item.existed) {
@@ -101,7 +165,7 @@ function Commit-Entries($Entries, [string]$Transaction) {
             Copy-Item -LiteralPath (Join-Path $Root $item.relative) -Destination $old -Recurse
             if (Test-Path -LiteralPath $old -PathType Leaf) { $item.sha256 = Get-Hash $old }
             else {
-                foreach ($file in Get-ChildItem -LiteralPath $old -File -Recurse) {
+                foreach ($file in Get-SafeTree $old | Where-Object { -not $_.PSIsContainer }) {
                     $relative = $file.FullName.Substring($old.Length + 1).Replace('\', '/')
                     $item.inventory += [ordered]@{ path = $relative; sha256 = Get-Hash $file.FullName }
                 }
@@ -134,9 +198,14 @@ function Commit-Entries($Entries, [string]$Transaction) {
 }
 
 try {
+    Assert-NoReparsePath $Root
+    Assert-NoReparsePath $CacheDirectory
+    Assert-NoReparsePath $Dest
     New-Item -ItemType Directory -Path $CacheDirectory -Force | Out-Null
     # Serialize fetch/build/deploy operations in this checkout.
     $lockDirectory = Join-Path $Root 'build-win/_ngx_fetch'
+    Assert-NoReparsePath $lockDirectory
+    Assert-NoReparsePath (Join-Path $lockDirectory 'install.lock')
     New-Item -ItemType Directory -Force -Path $lockDirectory | Out-Null
     $Lock = [IO.File]::Open((Join-Path $lockDirectory 'install.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
     $Transaction = Join-Path $CacheDirectory ('transaction-' + [Guid]::NewGuid().ToString('N'))
@@ -145,6 +214,7 @@ try {
     if ($RestoreBackup) {
         if ($RestoreBackup -notmatch '^transaction-[a-f0-9]{32}$') { throw 'Use the backup identifier printed by a successful install.' }
         $backup = Join-Path $CacheDirectory ('backups/' + $RestoreBackup)
+        Assert-NoReparsePath (Join-Path $backup 'backup.json')
         $record = Get-Content -LiteralPath (Join-Path $backup 'backup.json') -Raw | ConvertFrom-Json
         if (-not $record.completed) { throw 'Backup is from an incomplete install.' }
         foreach ($item in $record.entries) {
@@ -153,12 +223,15 @@ try {
             $source = $null
             if ($item.existed) {
                 $old = Join-Path $backup ('old/' + $item.relative)
+                Assert-NoReparsePath $old
                 if (-not (Test-Path -LiteralPath $old)) { throw "Backup missing: $($item.relative)" }
+                if (Test-Path -LiteralPath $old -PathType Container) { $null = @(Get-SafeTree $old) }
                 if ($item.sha256 -and (Get-Hash $old) -ne $item.sha256) { throw "Backup corrupted: $($item.relative)" }
                 if ($item.inventory.Count -and @(Get-ChildItem -LiteralPath $old -File -Recurse).Count -ne $item.inventory.Count) { throw 'Backup SDK inventory changed.' }
                 foreach ($file in $item.inventory) {
                     if ($file.path -match '(^[/\\]|(^|[/\\])\.\.([/\\]|$)|:)') { throw 'Invalid backup inventory path.' }
                     $check = Join-Path $old $file.path
+                    Assert-NoReparsePath $check
                     if (-not (Test-Path -LiteralPath $check -PathType Leaf) -or (Get-Hash $check) -ne $file.sha256) { throw "Backup SDK file corrupted: $($file.path)" }
                 }
                 $source = Join-Path $Transaction ('new/' + $item.relative)
@@ -172,21 +245,24 @@ try {
     } else {
         Write-Host "WinDoom: official NVIDIA SDK $($Release.sdkTag), commit $($Release.commit)"
         $cache = Join-Path $CacheDirectory $Release.commit
+        Assert-NoReparsePath $cache
         New-Item -ItemType Directory -Force -Path $cache | Out-Null
         $reuse = $false
+        Assert-NoReparsePath (Join-Path $Dest 'ngx-install.json')
         if (Test-Path -LiteralPath (Join-Path $Dest 'ngx-install.json')) {
             try {
                 $installed = Get-Content -LiteralPath (Join-Path $Dest 'ngx-install.json') -Raw | ConvertFrom-Json
                 $reuse = ($installed.commit -eq $Release.commit) -and ($installed.sdkTag -eq $Release.sdkTag) -and
                     ($installed.source -eq $Release.source) -and ($installed.architecture -eq $Release.architecture) -and
                     ($installed.configuration -eq $Release.configuration) -and
-                    (($installed.files | ConvertTo-Json -Depth 4 -Compress) -eq ($Release.files | ConvertTo-Json -Depth 4 -Compress)) -and (Test-Files $Dest)
+                    (($installed.files | ConvertTo-Json -Depth 4 -Compress) -eq ($Release.files | ConvertTo-Json -Depth 4 -Compress)) -and (Test-Files $Dest) -and (Test-InstalledInventory $Dest)
             } catch { Write-Host 'Invalid installation metadata; staging a complete replacement.' }
         }
         if ($reuse) { $sdk = $Dest; Write-Host 'Verified installed SDK; reusing complete installation.' }
         else {
             foreach ($file in $Release.files) {
-                $path = Join-Path $cache $file.path
+                $path = Get-PinnedPath $cache $file.path
+                Assert-NoReparsePath "$path.partial"
                 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
                 $valid = (Test-Path -LiteralPath $path -PathType Leaf) -and ((Get-Hash $path) -eq $file.sha256)
                 if (-not $valid) {
@@ -197,7 +273,7 @@ try {
             }
             if (-not (Test-Files $cache)) { throw 'Incomplete or corrupted SDK cache.' }
             $sdk = Join-Path $Transaction 'sdk'
-            Copy-Item -LiteralPath $cache -Destination $sdk -Recurse
+            Copy-PinnedSdk $cache $sdk
             $entries += [ordered]@{ relative = 'third_party/ngx'; source = $sdk }
         }
         $sr = Get-RuntimeInfo (Join-Path $sdk 'lib/Windows_x86_64/rel/nvngx_dlss.dll')
@@ -207,6 +283,10 @@ try {
         foreach ($name in $ModeNames) {
             $relative = 'build-win/Release/' + $name
             $directory = Join-Path $Root $relative
+            Assert-NoReparsePath $directory
+            foreach ($managed in @('nvngx_dlss.dll', 'nvngx_dlssd.dll', 'ngx-install.json')) {
+                Assert-NoReparsePath (Join-Path $directory $managed)
+            }
             if (-not (Test-Path -LiteralPath $directory)) { continue }
             $runtimeSet = @($sr)
             $staleRR = $null
