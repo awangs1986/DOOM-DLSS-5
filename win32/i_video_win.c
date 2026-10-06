@@ -643,12 +643,12 @@ static void overlay_hud_on_bb(ID3D12Resource *dst)
     UINT64 total;
     unsigned char *mapped = NULL;
     const unsigned char *color;
-    const float *depth;
+    const unsigned char *mask;
     int sx, sy, x0, x1, dx, dy, x, y;
 
-    color = GB_ColorRGBA();
-    depth = GB_Depth();
-    if (!dst || !color || !depth)
+    color = GB_OverlayRGBA();
+    mask = GB_OverlayMask();
+    if (!dst || !color || !mask)
 	return;
 
     memset(&desc, 0, sizeof(desc));
@@ -679,11 +679,11 @@ static void overlay_hud_on_bb(ID3D12Resource *dst)
 	while (sx < GB_WIDTH)
 	{
 	    while (sx < GB_WIDTH &&
-		   depth[sy * GB_WIDTH + sx] != 0.0f)
+		   !mask[sy * GB_WIDTH + sx])
 		sx++;
 	    x0 = sx;
 	    while (sx < GB_WIDTH &&
-		   depth[sy * GB_WIDTH + sx] == 0.0f)
+		   mask[sy * GB_WIDTH + sx])
 		sx++;
 	    x1 = sx;
 	    if (x1 <= x0)
@@ -720,84 +720,6 @@ static void overlay_hud_on_bb(ID3D12Resource *dst)
 		g_cmd, &dst_loc, box.left, box.top, 0, &src_loc, &box);
 	}
     }
-    ID3D12Resource_Unmap(g_up_present, 0, NULL);
-}
-
-static void blit_statusbar(ID3D12Resource *dst)
-{
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp;
-    D3D12_TEXTURE_COPY_LOCATION dst_loc;
-    D3D12_TEXTURE_COPY_LOCATION src_loc;
-    D3D12_RESOURCE_DESC desc;
-    D3D12_BOX box;
-    UINT num_rows;
-    UINT64 row_size;
-    UINT64 total;
-    unsigned char *mapped = NULL;
-    const unsigned char *color;
-    int x, y, sx, sy;
-    int st_y = GB_HEIGHT - 32;
-    int dst_y;
-
-    if (!dst || viewheight <= 0 || viewheight >= GB_HEIGHT)
-	return;
-    /* Status bar is ST_Y=168, not viewheight (144). 3D sits at
-     * viewwindowy..viewwindowy+viewheight-1 (12..155 at screenblocks 9). */
-    st_y = SCREENHEIGHT - 32;
-    dst_y = st_y * WIN_SCALE;
-    if (dst_y >= WIN_H)
-	return;
-    color = GB_ColorRGBA();
-    if (!color)
-	return;
-
-    memset(&desc, 0, sizeof(desc));
-    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    desc.Width = WIN_W;
-    desc.Height = WIN_H;
-    desc.DepthOrArraySize = 1;
-    desc.MipLevels = 1;
-    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    desc.SampleDesc.Count = 1;
-    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-    ID3D12Device_GetCopyableFootprints(g_dev, &desc, 0, 1, 0,
-				       &fp, &num_rows, &row_size, &total);
-    if (FAILED(ID3D12Resource_Map(g_up_present, 0, NULL, (void **)&mapped)))
-	return;
-
-    for (y = dst_y; y < WIN_H; y++)
-    {
-	sy = y / WIN_SCALE;
-	for (x = 0; x < WIN_W; x++)
-	{
-	    const unsigned char *s;
-	    unsigned char *d;
-
-	    sx = x / WIN_SCALE;
-	    s = color + (sy * GB_WIDTH + sx) * 4;
-	    d = mapped + fp.Offset + (UINT)y * fp.Footprint.RowPitch +
-		(UINT)x * 4;
-	    d[0] = s[2];
-	    d[1] = s[1];
-	    d[2] = s[0];
-	    d[3] = 255;
-	}
-    }
-    memset(&dst_loc, 0, sizeof(dst_loc));
-    dst_loc.pResource = dst;
-    dst_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    memset(&src_loc, 0, sizeof(src_loc));
-    src_loc.pResource = g_up_present;
-    src_loc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-    src_loc.PlacedFootprint = fp;
-    box.left = 0;
-    box.top = (UINT)dst_y;
-    box.front = 0;
-    box.right = WIN_W;
-    box.bottom = WIN_H;
-    box.back = 1;
-    ID3D12GraphicsCommandList_CopyTextureRegion(
-	g_cmd, &dst_loc, 0, (UINT)dst_y, 0, &src_loc, &box);
     ID3D12Resource_Unmap(g_up_present, 0, NULL);
 }
 
@@ -1132,7 +1054,7 @@ void I_FinishUpdate(void)
     }
 
     if (!used_ngx && !used_fsr2 && Anime4K_Ready() &&
-	GB_GetDebugView() == GB_VIEW_COLOR)
+        GB_GetDebugView() == GB_VIEW_COLOR && GB_HasScenePixels())
     {
 	barrier(g_tex_color, &g_st_color,
 		D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -1143,26 +1065,20 @@ void I_FinishUpdate(void)
     GpuTiming_Mark(g_cmd, 2);
     if (used_ngx || used_a4k || used_fsr2)
     {
-	int hud_y = (SCREENHEIGHT - 32) * WIN_SCALE;
-
-	uav_barrier(g_tex_out);
-	barrier(g_tex_out, &g_st_out, D3D12_RESOURCE_STATE_COPY_SOURCE);
-	barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_COPY_DEST);
-	if (GB_HudVisible() && hud_y > 0 && hud_y < WIN_H)
-	    copy_tex_rows(g_tex_out, g_bb[idx], 0, (UINT)hud_y);
-	else
-	    copy_tex_to_tex(g_tex_out, g_bb[idx]);
-	if (GB_HudVisible())
-	    blit_statusbar(g_bb[idx]);
+        uav_barrier(g_tex_out);
+        barrier(g_tex_out, &g_st_out, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_COPY_DEST);
+        copy_tex_to_tex(g_tex_out, g_bb[idx]);
+        /* Coverage includes identical-color pixels; weapon/UI never rely on
+         * scene depth or palette difference to classify their visibility. */
+        overlay_hud_on_bb(g_bb[idx]);
     }
     else
     {
-	GB_ComposePresent(g_present, WIN_W, WIN_H);
-	barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_COPY_DEST);
-	upload_tex(g_bb[idx], g_up_present, g_present,
-		   WIN_W, WIN_H, 4, DXGI_FORMAT_B8G8R8A8_UNORM);
-	if (GB_HudVisible())
-	    blit_statusbar(g_bb[idx]);
+        GB_ComposePresent(g_present, WIN_W, WIN_H);
+        barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_COPY_DEST);
+        upload_tex(g_bb[idx], g_up_present, g_present,
+                   WIN_W, WIN_H, 4, DXGI_FORMAT_B8G8R8A8_UNORM);
     }
 
     GpuTiming_Mark(g_cmd, 3);
@@ -1281,6 +1197,10 @@ void I_InitGraphics(void)
 	GB_SetDebugView(GB_VIEW_NORMAL);
     else if (M_CheckParm("-velocity"))
 	GB_SetDebugView(GB_VIEW_VELOCITY);
+    else if (M_CheckParm("-scene-mask"))
+        GB_SetDebugView(GB_VIEW_SCENE_MASK);
+    else if (M_CheckParm("-overlay-mask"))
+        GB_SetDebugView(GB_VIEW_OVERLAY_MASK);
     else if (M_CheckParm("-color"))
 	GB_SetDebugView(GB_VIEW_COLOR);
 

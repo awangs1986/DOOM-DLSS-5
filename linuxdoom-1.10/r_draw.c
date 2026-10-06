@@ -271,6 +271,14 @@ void R_DrawColumnLow (void)
 	frac += fracstep; 
 
     } while (count--);
+#ifdef _WIN32
+    GB_MarkOverlayColumn(columnofs[dc_x << 1],
+                         (int)(ylookup[dc_yl] - screens[0]) / SCREENWIDTH,
+                         dc_yh - dc_yl + 1);
+    GB_MarkOverlayColumn(columnofs[(dc_x << 1) + 1],
+                         (int)(ylookup[dc_yl] - screens[0]) / SCREENWIDTH,
+                         dc_yh - dc_yl + 1);
+#endif
 }
 
 

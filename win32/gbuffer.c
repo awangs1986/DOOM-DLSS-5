@@ -14,6 +14,13 @@
 #define GB_FAR_Z 8192.0f
 
 static unsigned char gb_color[GB_PIX * 4];
+static unsigned char gb_scene8[GB_PIX];
+static unsigned char gb_overlay_color[GB_PIX * 4];
+static unsigned char gb_scene_mask[GB_PIX];
+static unsigned char gb_overlay_mask[GB_PIX];
+static int gb_scene_captured;
+static int gb_overlay_drawing;
+static int gb_last_scene;
 static float         gb_depth[GB_PIX];
 static unsigned char gb_normal[GB_PIX * 4];
 static float         gb_velocity[GB_PIX * 2];
@@ -39,6 +46,7 @@ static void gb_clear_aux(void)
 {
     int i;
 
+    memset(gb_scene_mask, 0, sizeof(gb_scene_mask));
     memset(gb_depth, 0, sizeof(gb_depth));
     memset(gb_normal, 0, sizeof(gb_normal));
     memset(gb_velocity, 0, sizeof(gb_velocity));
@@ -52,6 +60,8 @@ void GB_Init(void)
 {
     memset(gb_color, 0, sizeof(gb_color));
     gb_clear_aux();
+    gb_scene_captured = gb_overlay_drawing = gb_last_scene = 0;
+    memset(gb_overlay_mask, 0, sizeof(gb_overlay_mask));
     gb_have_prev = 0;
     gb_reset = 1;
     gb_debug_view = GB_VIEW_COLOR;
@@ -70,6 +80,39 @@ void GB_BeginFrame(void)
     gb_col_x = -1;
     gb_col_du = 0.0f;
     gb_col_dv = 0.0f;
+    GB_BeginDisplay();
+}
+
+void GB_BeginDisplay(void)
+{
+    gb_scene_captured = 0;
+    gb_overlay_drawing = 0;
+    memset(gb_overlay_mask, 0, sizeof(gb_overlay_mask));
+}
+
+void GB_InvalidateScene(void)
+{
+    gb_scene_captured = 0;
+    gb_overlay_drawing = 0;
+    memset(gb_overlay_mask, 0, sizeof(gb_overlay_mask));
+    gb_clear_aux();
+}
+
+void GB_MarkOverlayColumn(int x, int y, int count)
+{
+    int end = y + count;
+    if (!gb_overlay_drawing || (unsigned)x >= GB_WIDTH || count <= 0) return;
+    if (y < 0) y = 0;
+    if (end > GB_HEIGHT) end = GB_HEIGHT;
+    for (; y < end; ++y) gb_overlay_mask[y * GB_WIDTH + x] = 1;
+}
+
+void GB_MarkOverlayRect(int x, int y, int width, int height)
+{
+    int end = x + width;
+    if (x < 0) x = 0;
+    if (end > GB_WIDTH) end = GB_WIDTH;
+    for (; x < end; ++x) GB_MarkOverlayColumn(x, y, height);
 }
 
 void GB_SetColumn(int x, float z, float nx, float ny, float nz, int kind)
@@ -127,6 +170,7 @@ static void gb_write_pixel(int x, int y, float z, float nx, float ny, float nz)
 	return;
 
     i = y * GB_WIDTH + x;
+    gb_scene_mask[i] = z > 0.0f && z < GB_FAR_Z;
     gb_depth[i] = z;
     gb_obj_du[i] = gb_col_du;
     gb_obj_dv[i] = gb_col_dv;
@@ -148,8 +192,12 @@ void GB_WriteColumn(int x, int yl, int yh)
     int y;
     int sx;
 
+    if (gb_overlay_drawing) {
+        GB_MarkOverlayColumn(gb_screen_x(x), gb_screen_y(yl), yh - yl + 1);
+        return;
+    }
     if (x != gb_col_x)
-	return;
+        return;
     if (yl < 0)
 	yl = 0;
     if (viewheight > 0 && yh >= viewheight)
@@ -173,6 +221,10 @@ void GB_WriteSpan(int y, int x1, int x2, float z, float nx, float ny, float nz)
 	x1 = 0;
     if (viewwidth > 0 && x2 >= viewwidth)
 	x2 = viewwidth - 1;
+    if (gb_overlay_drawing) {
+        GB_MarkOverlayRect(gb_screen_x(x1), gb_screen_y(y), x2 - x1 + 1, 1);
+        return;
+    }
     gb_col_du = 0.0f;
     gb_col_dv = 0.0f;
     sy = gb_screen_y(y);
@@ -183,29 +235,6 @@ void GB_WriteSpan(int y, int x1, int x2, float z, float nx, float ny, float nz)
 static float gb_bam_to_rad(angle_t a)
 {
     return (float)((double)a * (6.283185307179586 / 4294967296.0));
-}
-
-static void gb_copy_pixel(int dx, int dy, int sx, int sy, int copy_color)
-{
-    int di;
-    int si;
-
-    if ((unsigned)dx >= (unsigned)GB_WIDTH ||
-	(unsigned)dy >= (unsigned)GB_HEIGHT ||
-	(unsigned)sx >= (unsigned)GB_WIDTH ||
-	(unsigned)sy >= (unsigned)GB_HEIGHT)
-	return;
-    di = dy * GB_WIDTH + dx;
-    si = sy * GB_WIDTH + sx;
-    gb_depth[di] = gb_depth[si];
-    gb_obj_du[di] = gb_obj_du[si];
-    gb_obj_dv[di] = gb_obj_dv[si];
-    /* Bezel / HUD are static 2D overlays: never inherit scene motion. */
-    gb_velocity[di * 2 + 0] = 0.0f;
-    gb_velocity[di * 2 + 1] = 0.0f;
-    memcpy(gb_normal + di * 4, gb_normal + si * 4, 4);
-    if (copy_color)
-	memcpy(gb_color + di * 4, gb_color + si * 4, 4);
 }
 
 static void gb_view_rect(int *x0, int *y0, int *x1, int *y1)
@@ -231,38 +260,29 @@ static void gb_view_rect(int *x0, int *y0, int *x1, int *y1)
 	*y1 = GB_HEIGHT - 1;
 }
 
-static void gb_pad_view_edges(void)
+void GB_CaptureScene(const unsigned char *src8)
 {
-    int x, y;
-    int x0, y0, x1, y1;
-    int ymax;
-    int copy_color;
-
+    int x, y, x0, y0, x1, y1;
+    if (!src8) return;
+    memcpy(gb_scene8, src8, sizeof(gb_scene8));
     gb_view_rect(&x0, &y0, &x1, &y1);
-    copy_color = !gb_hud_visible;
-    ymax = gb_hud_visible ? (SCREENHEIGHT - 32) : GB_HEIGHT;
-    if (ymax > GB_HEIGHT)
-	ymax = GB_HEIGHT;
-    for (y = 0; y < ymax; y++)
-    {
-	for (x = 0; x < GB_WIDTH; x++)
-	{
-	    int cx = x;
-	    int cy = y;
-
-	    if (x >= x0 && x <= x1 && y >= y0 && y <= y1)
-		continue;
-	    if (cx < x0)
-		cx = x0;
-	    if (cx > x1)
-		cx = x1;
-	    if (cy < y0)
-		cy = y0;
-	    if (cy > y1)
-		cy = y1;
-	    gb_copy_pixel(x, y, cx, cy, copy_color);
-	}
+    for (y = 0; y < GB_HEIGHT; ++y) {
+        for (x = 0; x < GB_WIDTH; ++x) {
+            int i = y * GB_WIDTH + x;
+            if (x >= x0 && x <= x1 && y >= y0 && y <= y1) continue;
+            /* Upscaler padding has a far-depth sentinel and zero velocity.
+             * It is never valid ray-tracing geometry or a fake UI surface. */
+            gb_depth[i] = GB_FAR_Z;
+            gb_scene_mask[i] = 0;
+            gb_obj_du[i] = gb_obj_dv[i] = 0.0f;
+            memset(gb_normal + i * 4, 0, 4);
+            gb_scene8[i] = src8[(y < y0 ? y0 : y > y1 ? y1 : y) * GB_WIDTH +
+                                  (x < x0 ? x0 : x > x1 ? x1 : x)];
+            if (gb_hud_visible) gb_overlay_mask[i] = 1;
+        }
     }
+    gb_scene_captured = 1;
+    gb_overlay_drawing = 1;
 }
 
 void GB_EndFrame(void)
@@ -274,6 +294,10 @@ void GB_EndFrame(void)
     float cur_c, cur_s, prev_c, prev_s;
     float proj;
 
+    if (!gb_scene_captured) {
+        gb_have_prev = 0;
+        return;
+    }
     gb_view_rect(&x0, &y0, &x1, &y1);
     cur_x = (float)viewx / 65536.0f;
     cur_y = (float)viewy / 65536.0f;
@@ -370,7 +394,6 @@ void GB_EndFrame(void)
     gb_prev_viewz = viewz;
     gb_prev_viewangle = viewangle;
     gb_have_prev = 1;
-    gb_pad_view_edges();
 }
 
 void GB_SetPaletteRGB(const unsigned char *rgb768)
@@ -381,14 +404,19 @@ void GB_SetPaletteRGB(const unsigned char *rgb768)
 void GB_ConvertColor(const unsigned char *src8)
 {
     int i;
-
-    for (i = 0; i < GB_PIX; i++)
-    {
-	const unsigned char *p = gb_palette + src8[i] * 3;
-	gb_color[i * 4 + 0] = p[0];
-	gb_color[i * 4 + 1] = p[1];
-	gb_color[i * 4 + 2] = p[2];
-	gb_color[i * 4 + 3] = 255;
+    const unsigned char *scene = gb_scene_captured ? gb_scene8 : src8;
+    if (gb_last_scene != gb_scene_captured) GB_RequestReset();
+    gb_last_scene = gb_scene_captured;
+    if (!gb_scene_captured) gb_clear_aux();
+    for (i = 0; i < GB_PIX; i++) {
+        const unsigned char *p = gb_palette + scene[i] * 3;
+        const unsigned char *overlay = gb_palette + src8[i] * 3;
+        gb_color[i * 4 + 0] = p[0];
+        gb_color[i * 4 + 1] = p[1];
+        gb_color[i * 4 + 2] = p[2];
+        gb_color[i * 4 + 3] = 255;
+        memcpy(gb_overlay_color + i * 4, overlay, 3);
+        gb_overlay_color[i * 4 + 3] = 255;
     }
 }
 
@@ -396,8 +424,8 @@ void GB_SetDebugView(int view)
 {
     if (view < GB_VIEW_COLOR)
 	view = GB_VIEW_COLOR;
-    if (view > GB_VIEW_VELOCITY)
-	view = GB_VIEW_VELOCITY;
+    if (view > GB_VIEW_OVERLAY_MASK)
+        view = GB_VIEW_OVERLAY_MASK;
     gb_debug_view = view;
 }
 
@@ -421,6 +449,10 @@ const unsigned char *GB_ColorRGBA(void)
 {
     return gb_color;
 }
+
+const unsigned char *GB_OverlayRGBA(void) { return gb_overlay_color; }
+const unsigned char *GB_SceneMask(void) { return gb_scene_mask; }
+const unsigned char *GB_OverlayMask(void) { return gb_overlay_mask; }
 
 const float *GB_Depth(void)
 {
@@ -466,18 +498,24 @@ void GB_ComposePresent(unsigned char *dst_bgra, int dst_w, int dst_h)
 	    sx = x * GB_WIDTH / dst_w;
 	    src = sy * GB_WIDTH + sx;
 	    switch (gb_debug_view)
-	    {
+            {
+              case GB_VIEW_SCENE_MASK:
+                r = g = b = gb_scene_mask[src] ? 255 : 0;
+                break;
+              case GB_VIEW_OVERLAY_MASK:
+                r = g = b = gb_overlay_mask[src] ? 255 : 0;
+                break;
 	      case GB_VIEW_DEPTH:
 	      {
 		  float z = gb_depth[src];
-		  float t = (z <= 0.0f) ? 0.0f : (1.0f / (1.0f + z / 256.0f));
+		  float t = (!gb_scene_mask[src]) ? 0.0f : (1.0f / (1.0f + z / 256.0f));
 		  r = g = b = gb_clamp_u8((int)(t * 255.0f + 0.5f));
 		  break;
 	      }
 	      case GB_VIEW_NORMAL:
-		  r = gb_normal[src * 4 + 0];
-		  g = gb_normal[src * 4 + 1];
-		  b = gb_normal[src * 4 + 2];
+                  r = gb_scene_mask[src] ? gb_normal[src * 4 + 0] : 0;
+                  g = gb_scene_mask[src] ? gb_normal[src * 4 + 1] : 0;
+                  b = gb_scene_mask[src] ? gb_normal[src * 4 + 2] : 0;
 		  break;
 	      case GB_VIEW_VELOCITY:
 		  r = gb_clamp_u8((int)(128.0f + gb_velocity[src * 2 + 0] * 8.0f));
@@ -498,15 +536,17 @@ void GB_ComposePresent(unsigned char *dst_bgra, int dst_w, int dst_h)
             d[3] = 255;
 	}
     }
+    if (gb_debug_view == GB_VIEW_COLOR) GB_OverlayHud(dst_bgra, dst_w, dst_h);
 }
 
 int GB_HasScenePixels(void)
 {
     int i;
 
+    if (!gb_scene_captured) return 0;
     for (i = 0; i < GB_PIX; i++)
     {
-	if (gb_depth[i] > 0.0f && gb_depth[i] < GB_FAR_Z)
+        if (gb_scene_mask[i])
 	    return 1;
     }
     return 0;
@@ -530,12 +570,12 @@ void GB_OverlayHud(unsigned char *dst_bgra, int dst_w, int dst_h)
 
 	    sx = x * GB_WIDTH / dst_w;
 	    src = sy * GB_WIDTH + sx;
-	    if (gb_depth[src] != 0.0f)
-		continue;
+	    if (!gb_overlay_mask[src])
+                continue;
 	    d = dst_bgra + (y * dst_w + x) * 4;
-	    d[0] = gb_color[src * 4 + 2];
-	    d[1] = gb_color[src * 4 + 1];
-	    d[2] = gb_color[src * 4 + 0];
+	    d[0] = gb_overlay_color[src * 4 + 2];
+            d[1] = gb_overlay_color[src * 4 + 1];
+            d[2] = gb_overlay_color[src * 4 + 0];
 	    d[3] = 255;
 	}
     }
