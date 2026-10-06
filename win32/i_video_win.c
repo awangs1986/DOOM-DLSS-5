@@ -28,6 +28,8 @@
 #include "fsr2.h"
 #include "png_export.h"
 #include "gpu_timing.h"
+#include "dxr_diagnostic.h"
+#include "render_adapter.h"
 
 extern int viewheight;
 extern boolean singletics;
@@ -213,6 +215,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 	grab_mouse(0);
 	return 0;
       case WM_KEYDOWN:
+	if (wparam == VK_F5 && M_CheckParm("-rt-diagnostic"))
+	{
+	    if (!(lparam & (1L << 30))) DxrDiag_Toggle();
+	    return 0;
+	}
       case WM_SYSKEYDOWN:
 	if (wparam == VK_F1) { GB_SetDebugView(GB_VIEW_COLOR); return 0; }
 	if (wparam == VK_F2) { GB_SetDebugView(GB_VIEW_DEPTH); return 0; }
@@ -872,8 +879,7 @@ static void init_d3d(HWND hwnd)
     if (FAILED(hr))
 	I_Error("CreateDXGIFactory2 failed (0x%08lx)", (unsigned long)hr);
 
-    hr = D3D12CreateDevice(NULL, D3D_FEATURE_LEVEL_11_0,
-			   &IID_ID3D12Device, (void **)&g_dev);
+    hr = Render_CreateDevice(factory, &g_dev);
     if (FAILED(hr))
 	I_Error("D3D12CreateDevice failed (0x%08lx)", (unsigned long)hr);
 
@@ -1031,6 +1037,7 @@ void I_FinishUpdate(void)
 
     wait_gpu();
     GpuTiming_Collect();
+    DxrDiag_Prepare();
     idx = IDXGISwapChain3_GetCurrentBackBufferIndex(g_swap);
     ID3D12CommandAllocator_Reset(g_alloc);
     ID3D12GraphicsCommandList_Reset(g_cmd, g_alloc, NULL);
@@ -1165,6 +1172,8 @@ void I_FinishUpdate(void)
 	    blit_statusbar(g_bb[idx]);
     }
 
+    /* Diagnostic intentionally replaces the full view, including 2D overlays. */
+    DxrDiag_Render(g_cmd, g_bb[idx]);
     GpuTiming_Mark(g_cmd, 3);
     if (g_export_dir)
     {
@@ -1218,6 +1227,7 @@ void I_ShutdownGraphics(void)
 	fprintf(stderr, "export: %d frames written\n", g_export_frame);
     GpuTiming_Collect();
     GpuTiming_Shutdown();
+    DxrDiag_Shutdown();
     Png_Shutdown();
     Anime4K_Shutdown();
     Fsr2_Shutdown();
@@ -1323,6 +1333,8 @@ void I_InitGraphics(void)
 	I_Error("CreateWindow failed");
 
     init_d3d(g_hwnd);
+    DxrDiag_Init(g_dev, g_queue, WIN_W, WIN_H,
+                 M_CheckParm("-rt-diagnostic") != 0, M_CheckParm("-nort") != 0);
     if (Ngx_Wanted())
 	Ngx_Init(g_dev, g_queue);
     if (Ngx_WantsHiRes() && !init_hi_res())

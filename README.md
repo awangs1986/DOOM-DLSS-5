@@ -71,6 +71,14 @@ see [GPU baseline capture](docs/gpu-baseline.md). PNGs include HUD and F1–F4 v
 
        ffmpeg -framerate 35 -i D:\frames\windoom-ngx-dlss5\f%06d.png -c:v libx264 -pix_fmt yuv420p dlss5.mp4
 
+## DXR hardware diagnostic
+
+Use `-rt-diagnostic` to show hardware ray hits against a minimal triangle,
+`F5` to return to gameplay, `-adapter <DXGI index>` to select the actual GPU,
+and `-nort` to disable RT. DXR and NGX capabilities are checked independently.
+See [DXR diagnostic](docs/dxr-diagnostic.md) for DXC requirements and fallback.
+Real map shadows and reflections are separate work.
+
 ## DLSS 5 Swapper
 
 Point Swapper at `build-win\Release\windoom-ngx-dlss5` (not the

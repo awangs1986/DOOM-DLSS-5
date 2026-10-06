@@ -1,7 +1,7 @@
 # WinDoom: Windows x64 build of Linux DOOM 1.10.
 # Copyright (C) 2026 Nikolai Zhivotenko. Licensed under GPLv2 (LICENSE.TXT).
-cmake_minimum_required(VERSION 3.16)
-project(windoom C)
+cmake_minimum_required(VERSION 3.20)
+project(windoom C CXX)
 
 if(NOT WIN32)
   message(FATAL_ERROR "windoom is a Windows x64 target")
@@ -9,6 +9,8 @@ endif()
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(DOOM_DIR ${CMAKE_SOURCE_DIR}/linuxdoom-1.10)
 
@@ -76,6 +78,8 @@ set(DOOM_SOURCES
 add_executable(windoom
   ${DOOM_SOURCES}
   win32/gbuffer.c
+  win32/dxr_diagnostic.cpp
+  win32/render_adapter.c
   win32/gpu_timing.c
   win32/i_main_win.c
   win32/i_net_win.c
@@ -193,3 +197,34 @@ add_custom_command(TARGET windoom POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
     "${CMAKE_SOURCE_DIR}/languages" "$<TARGET_FILE_DIR:windoom>/languages"
 )
+
+# Inline ray queries require DXIL/Shader Model 6.5. Missing DXC leaves normal
+# rendering available; runtime diagnostic reports the absent shader.
+option(WINDOOM_DXR "Build the DXR inline-ray diagnostic shader when DXC is available" ON)
+if(WINDOOM_DXR)
+  file(GLOB _wd_dxc_paths "C:/Program Files (x86)/Windows Kits/10/bin/*/x64")
+  list(SORT _wd_dxc_paths ORDER DESCENDING)
+  find_program(DXC_EXECUTABLE NAMES dxc.exe dxc HINTS ${_wd_dxc_paths})
+  if(DXC_EXECUTABLE)
+    # Generate directly beside the executable: shader-only rebuilds must also
+    # refresh the runtime asset even when windoom does not relink.
+    get_target_property(_wd_runtime_dir windoom RUNTIME_OUTPUT_DIRECTORY)
+    if(NOT _wd_runtime_dir)
+      set(_wd_runtime_dir "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+    if(CMAKE_CONFIGURATION_TYPES AND NOT _wd_runtime_dir MATCHES "\\$<")
+      string(APPEND _wd_runtime_dir "/$<CONFIG>")
+    endif()
+    set(_wd_dxr_shader "${_wd_runtime_dir}/shaders/dxr_diagnostic.cso")
+    add_custom_command(OUTPUT "${_wd_dxr_shader}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_wd_runtime_dir}/shaders"
+      COMMAND "${DXC_EXECUTABLE}" -T cs_6_5 -E main -O3
+        -Fo "${_wd_dxr_shader}" "${CMAKE_CURRENT_SOURCE_DIR}/win32/shaders/dxr/diagnostic.hlsl"
+      DEPENDS win32/shaders/dxr/diagnostic.hlsl VERBATIM)
+    add_custom_target(windoom_dxr_shader DEPENDS "${_wd_dxr_shader}")
+    add_dependencies(windoom windoom_dxr_shader)
+    message(STATUS "DXR diagnostic DXC: ${DXC_EXECUTABLE}")
+  else()
+    message(STATUS "DXC absent; normal rendering works, DXR diagnostic shader unavailable")
+  endif()
+endif()
