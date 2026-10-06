@@ -43,6 +43,7 @@ rcsid[] = "$Id: r_things.c,v 1.5 1997/02/03 16:47:56 b1 Exp $";
 
 #ifdef _WIN32
 #include "gbuffer.h"
+#include "v_video.h"
 
 static fixed_t vis_momx[MAXVISSPRITES];
 static fixed_t vis_momy[MAXVISSPRITES];
@@ -1058,6 +1059,11 @@ void R_DrawMasked (void)
 	if (ds->maskedtexturecol)
 	    R_RenderMaskedSegRange (ds, ds->x1, ds->x2);
     
+#ifdef _WIN32
+    /* The world behind the weapon is genuinely rendered before this boundary.
+     * Subsequent column/patch writes record explicit 2D coverage only. */
+    GB_CaptureScene(screens[0]);
+#endif
     // draw the psprites on top of everything
     //  but does not draw on side views
     if (!viewangleoffset)		

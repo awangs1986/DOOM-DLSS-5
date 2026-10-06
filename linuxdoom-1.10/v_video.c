@@ -38,6 +38,9 @@ rcsid[] = "$Id: v_video.c,v 1.5 1997/02/03 22:45:13 b1 Exp $";
 #include "m_swap.h"
 
 #include "v_video.h"
+#ifdef _WIN32
+#include "gbuffer.h"
+#endif
 
 
 // Each screen is [SCREENWIDTH*SCREENHEIGHT]; 
@@ -183,6 +186,9 @@ V_CopyRect
     }
 #endif 
     V_MarkRect (destx, desty, width, height); 
+#ifdef _WIN32
+    if (destscrn == 0) GB_MarkOverlayRect(destx, desty, width, height);
+#endif
 	 
     src = screens[srcscrn]+SCREENWIDTH*srcy+srcx; 
     dest = screens[destscrn]+SCREENWIDTH*desty+destx; 
@@ -249,9 +255,12 @@ V_DrawPatch
 	{ 
 	    source = (byte *)column + 3; 
 	    dest = desttop + column->topdelta*SCREENWIDTH; 
-	    count = column->length; 
-			 
-	    while (count--) 
+            count = column->length;
+#ifdef _WIN32
+            if (scrn == 0) GB_MarkOverlayColumn(x, y + column->topdelta, count);
+#endif
+
+            while (count--)
 	    { 
 		*dest = *source++; 
 		dest += SCREENWIDTH; 
@@ -314,9 +323,12 @@ V_DrawPatchFlipped
 	{ 
 	    source = (byte *)column + 3; 
 	    dest = desttop + column->topdelta*SCREENWIDTH; 
-	    count = column->length; 
-			 
-	    while (count--) 
+            count = column->length;
+#ifdef _WIN32
+            if (scrn == 0) GB_MarkOverlayColumn(x, y + column->topdelta, count);
+#endif
+
+            while (count--)
 	    { 
 		*dest = *source++; 
 		dest += SCREENWIDTH; 
@@ -424,6 +436,9 @@ V_DrawBlock
 #endif 
  
     V_MarkRect (x, y, width, height); 
+#ifdef _WIN32
+    if (scrn == 0) GB_MarkOverlayRect(x, y, width, height);
+#endif
  
     dest = screens[scrn] + y*SCREENWIDTH+x; 
 
