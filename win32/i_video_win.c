@@ -1069,6 +1069,9 @@ void I_FinishUpdate(void)
 	used_a4k = Anime4K_Evaluate(g_cmd, g_tex_color, g_tex_out);
     }
 
+    Ngx_RecordPresented(used_ngx, used_fsr2 ? "fsr2" :
+                        (used_a4k ? "anime4k-fast" : "nearest"));
+
     GpuTiming_Mark(g_cmd, 2);
     if (used_ngx || used_a4k || used_fsr2)
     {
@@ -1257,6 +1260,8 @@ void I_InitGraphics(void)
                  M_CheckParm("-rt-diagnostic") != 0, M_CheckParm("-nort") != 0);
     if (Ngx_Wanted())
 	Ngx_Init(g_dev, g_queue);
+    else
+        fprintf(stderr, "NGX disabled: sr_switch=off (-nodlss/-nosr), renderer continues\n");
     if (Ngx_WantsHiRes() && !init_hi_res())
 	I_Error("NGX hi-res G-buffers failed");
     if (!Ngx_Ready() && Fsr2_Wanted())
@@ -1277,10 +1282,8 @@ void I_InitGraphics(void)
 	fprintf(stderr, "present mode: anime4k-fast\n");
     else if (Fsr2_Ready())
 	fprintf(stderr, "present mode: fsr2\n");
-    else if (Ngx_WantsHiRes())
-	fprintf(stderr, "present mode: dlss5-stack\n");
     else if (Ngx_Ready())
-	fprintf(stderr, "present mode: dlss-upscale\n");
+	fprintf(stderr, "present mode: ngx-pending (evaluation not yet attempted)\n");
     else
 	fprintf(stderr, "present mode: nearest\n");
 }

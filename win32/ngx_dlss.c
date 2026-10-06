@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <d3d12.h>
+#include "ngx_runtime.h"
 
 #include <nvsdk_ngx.h>
 #include <nvsdk_ngx_defs.h>
@@ -31,12 +32,33 @@ enum
 
 int Ngx_Wanted(void)
 {
-    return M_CheckParm("-nodlss") == 0;
+    return M_CheckParm("-nodlss") == 0 && M_CheckParm("-nosr") == 0;
 }
 
 #ifdef WINDOOM_HAS_NGX
 
 static int g_inited;
+static const char *g_failure = "not-initialized";
+static int g_last_present = -1;
+static const char *g_last_fallback = "";
+static const char *g_evaluated_feature = "none";
+static unsigned g_sr_successes, g_sr_failures;
+static int ngx_inject(const char *stage)
+{
+#ifdef WINDOOM_NGX_DIAGNOSTICS
+    int p = M_CheckParm("-ngx-fail");
+    if (p && p + 1 < myargc &&
+        (!strcmp(myargv[p + 1], stage) ||
+         (!strcmp(stage, "evaluate") && !strcmp(myargv[p + 1], "evaluate-late") && g_sr_successes >= 3)))
+    {
+        fprintf(stderr, "NGX diagnostic: injected_failure=%s (synthetic API result; not hardware failure)\n", stage);
+        return 1;
+    }
+#else
+    (void)stage;
+#endif
+    return 0;
+}
 static int g_stack;
 static int g_dlaa_failed;
 static int g_mode;
@@ -207,6 +229,7 @@ static int ngx_check_dlss(void)
     {
 	if (needs_driver)
 	{
+            g_failure = "driver-too-old";
 	    fprintf(stderr,
 		    "NGX: driver too old, need %u.%u, using nearest\n",
 		    min_maj, min_min);
@@ -215,10 +238,17 @@ static int ngx_check_dlss(void)
 	fprintf(stderr, "NGX: min driver %u.%u\n", min_maj, min_min);
     }
 
+    if (ngx_inject("capability"))
+    {
+        g_failure = "capability-unavailable";
+        fprintf(stderr, "NGX fallback: reason=capability-unavailable\n");
+        return 0;
+    }
     r_av = NVSDK_NGX_Parameter_GetI(g_params,
 		NVSDK_NGX_Parameter_SuperSampling_Available, &available);
     if (r_av != NVSDK_NGX_Result_Success || !available)
     {
+        g_failure = "capability-unavailable";
 	NVSDK_NGX_Parameter_GetI(g_params,
 		NVSDK_NGX_Parameter_SuperSampling_FeatureInitResult,
 		(int *)&feat);
@@ -490,7 +520,9 @@ static int ngx_create_sr(ID3D12GraphicsCommandList *cl)
 	NVSDK_NGX_DLSS_Feature_Flags_MVLowRes |
 	NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
 
-    r = NGX_D3D12_CREATE_DLSS_EXT(cl, 1, 1, &g_handle, g_params, &create);
+    r = ngx_inject("create") ? NVSDK_NGX_Result_FAIL_InvalidParameter :
+        NGX_D3D12_CREATE_DLSS_EXT(cl, 1, 1, &g_handle, g_params, &create);
+    NgxRuntime_ReportLoaded("sr-create");
     if (NVSDK_NGX_FAILED(r) || !g_handle)
     {
 	fprintf(stderr, "NGX: CREATE_DLSS_EXT failed (0x%08x %ls)\n",
@@ -499,6 +531,7 @@ static int ngx_create_sr(ID3D12GraphicsCommandList *cl)
 	return 0;
     }
     g_using_rr = 0;
+    fprintf(stderr, "NGX feature: created=SR input=320x200 output=1280x800 preset_request=%s quality_request=UltraPerformance\n", g_mode == NGX_MODE_K ? "K" : "L");
     fprintf(stderr, "NGX: DLSS SR created (%s)\n",
 	    (g_mode == NGX_MODE_DLSS5) ? "l" : ngx_mode_name(g_mode));
     return 1;
@@ -618,6 +651,12 @@ int Ngx_Init(void *device, void *queue)
     wchar_t path[MAX_PATH];
 
     g_inited = 0;
+    g_failure = "initializing";
+    g_last_present = -1;
+    g_last_fallback = "";
+    g_evaluated_feature = "none";
+    g_sr_successes = g_sr_failures = 0;
+    NgxRuntime_Reset();
     g_stack = 0;
     g_dlaa_failed = 0;
     g_handle = NULL;
@@ -638,11 +677,26 @@ int Ngx_Init(void *device, void *queue)
     g_mode = ngx_resolve_mode(path);
     g_want_rr = (g_mode == NGX_MODE_RR);
     fprintf(stderr, "NGX: mode %s\n", ngx_mode_name(g_mode));
+    fprintf(stderr, "NGX build: sdk_release=%s sdk_commit=%s api=0x%x (compile identity, separate from DLL file version)\n", WINDOOM_NGX_BUILD_SDK_TAG, WINDOOM_NGX_BUILD_SDK_COMMIT, (unsigned)NVSDK_NGX_Version_API);
+#ifdef WINDOOM_NGX_DIAGNOSTICS
+    fprintf(stderr, "NGX build: failure_diagnostics=enabled\n");
+#else
+    fprintf(stderr, "NGX build: failure_diagnostics=disabled\n");
+#endif
+    fprintf(stderr, "NGX request: feature=%s input=320x200 output=1280x800 preset_request=%s sr_switch=on\n", g_want_rr ? "RR" : "SR", g_mode == NGX_MODE_K ? "K" : (g_want_rr ? "RR-default" : "L"));
+    if (!NgxRuntime_Prepare(path))
+    {
+        g_failure = "local-runtime-unavailable";
+        g_dev = NULL;
+        return 0;
+    }
 
-    r = NVSDK_NGX_D3D12_Init(0x57444f4dull, path, g_dev, NULL,
-			     NVSDK_NGX_Version_API);
+    r = ngx_inject("init") ? NVSDK_NGX_Result_Fail :
+        NVSDK_NGX_D3D12_Init(0x57444f4dull, path, g_dev, NULL, NVSDK_NGX_Version_API);
+    NgxRuntime_ReportLoaded("init");
     if (NVSDK_NGX_FAILED(r))
     {
+	g_failure = "init-failed";
 	fprintf(stderr, "NGX: init failed (0x%08x %ls), using nearest\n",
 		(unsigned)r, GetNGXResultAsString(r));
 	g_dev = NULL;
@@ -652,6 +706,7 @@ int Ngx_Init(void *device, void *queue)
     r = NVSDK_NGX_D3D12_GetCapabilityParameters(&g_params);
     if (NVSDK_NGX_FAILED(r) || !g_params)
     {
+	g_failure = "capability-query-failed";
 	fprintf(stderr, "NGX: no capability parameters, using nearest\n");
 	NVSDK_NGX_D3D12_Shutdown1(g_dev);
 	g_dev = NULL;
@@ -665,22 +720,25 @@ int Ngx_Init(void *device, void *queue)
     }
     ngx_log_optimal();
 
-    g_stack = (g_mode == NGX_MODE_DLSS5) && ngx_renodx_present(path);
+    fprintf(stderr, "NGX extension: addon_file=%s addon_module=%s neural_rendering=unverified\n", ngx_renodx_present(path) ? "present" : "absent", NgxRuntime_AddonLoaded() ? "loaded" : "not-loaded");
+    g_stack = (g_mode == NGX_MODE_DLSS5) && NgxRuntime_AddonLoaded();
     if (g_stack)
 	fprintf(stderr,
-		"NGX: RenoDX addon present; SR preset L then DLAA/NR "
-		"(HUD is blitted after NR)\n");
+		"NGX: RenoDX module loaded; requesting SR preset L then DLAA "
+		"(external NR activation not verified)\n");
 
     (void)queue;
     fprintf(stderr,
 	    "NGX: runtime ready (%s, feature created on first evaluate)\n",
 	    g_want_rr ? "rr" : (g_stack ? "dlss5-stack" : "dlss-upscale"));
     g_inited = 1;
+    g_failure = "none";
     return 1;
 }
 
 void Ngx_Shutdown(void)
 {
+    fprintf(stderr, "NGX summary: sr_evaluate_successes=%u sr_evaluate_failures=%u last_evaluated_feature=%s\n", g_sr_successes, g_sr_failures, g_evaluated_feature);
     ngx_teardown();
 }
 
@@ -721,13 +779,20 @@ static int ngx_eval_sr(ID3D12GraphicsCommandList *cl,
     ev.InMVScaleY = 1.0f;
     ev.InFrameTimeDeltaInMsec = 1000.0f / 35.0f;
 
-    r = NGX_D3D12_EVALUATE_DLSS_EXT(cl, g_handle, g_params, &ev);
+    r = ngx_inject("evaluate") ? NVSDK_NGX_Result_Fail :
+        NGX_D3D12_EVALUATE_DLSS_EXT(cl, g_handle, g_params, &ev);
+    NgxRuntime_ReportLoaded("sr-evaluate");
     if (NVSDK_NGX_FAILED(r))
     {
+	g_sr_failures++;
+        g_failure = "evaluate-failed";
+        g_inited = 0;
 	fprintf(stderr, "NGX: EVALUATE_DLSS_EXT failed (0x%08x %ls)\n",
 		(unsigned)r, GetNGXResultAsString(r));
 	return 0;
     }
+    g_sr_successes++;
+    g_evaluated_feature = "SR";
     return 1;
 }
 
@@ -768,6 +833,7 @@ static int ngx_eval_dlaa(ID3D12GraphicsCommandList *cl,
 		(unsigned)r, GetNGXResultAsString(r));
 	return 0;
     }
+    g_evaluated_feature = "SR+DLAA (external NR unverified)";
     return 1;
 }
 
@@ -811,6 +877,8 @@ static int ngx_eval_rr(ID3D12GraphicsCommandList *cl,
 		(unsigned)r, GetNGXResultAsString(r));
 	return 0;
     }
+    g_evaluated_feature = "RR (synthetic material inputs)";
+    NgxRuntime_ReportLoaded("rr-evaluate");
     return 1;
 }
 
@@ -823,6 +891,7 @@ int Ngx_Evaluate(void *cmdlist, void *color, void *depth, void *velocity,
 	return 0;
     if (!ngx_create_feature(cl))
     {
+        g_failure = "create-failed";
 	g_inited = 0;
 	return 0;
     }
@@ -871,6 +940,7 @@ int Ngx_EvaluateStack(void *cmdlist, void *color, void *depth, void *velocity,
 			    output, reset);
     if (!ngx_create_feature(cl))
     {
+        g_failure = "create-failed";
 	g_inited = 0;
 	return 0;
     }
@@ -917,7 +987,22 @@ int Ngx_EvaluateStack(void *cmdlist, void *color, void *depth, void *velocity,
     return 1;
 }
 
+void Ngx_RecordPresented(int used_ngx, const char *fallback_mode)
+{
+    if (used_ngx == g_last_present && (used_ngx || !strcmp(fallback_mode, g_last_fallback))) return;
+    g_last_present = used_ngx;
+    g_last_fallback = fallback_mode;
+    fprintf(stderr, "present mode: %s\n", used_ngx ? (g_using_rr ? "dlss-rr" : (strncmp(g_evaluated_feature, "SR+DLAA", 7) == 0 ? "dlss-stack" : "dlss-upscale")) : fallback_mode);
+    fprintf(stderr, "NGX presented: feature=%s input=320x200 output=1280x800 reason=%s\n", used_ngx ? g_evaluated_feature : "none", used_ngx ? "evaluation-succeeded" : (!Ngx_Wanted() ? "user-disabled" : (g_inited ? "non-scene-or-debug-view" : g_failure)));
+}
+
 #else /* !WINDOOM_HAS_NGX */
+
+void Ngx_RecordPresented(int used_ngx, const char *fallback_mode)
+{
+    (void)used_ngx;
+    (void)fallback_mode;
+}
 
 int Ngx_Init(void *device, void *queue)
 {

@@ -13,10 +13,10 @@ One NGX binary, four folders. A one-line `ngx.mode` file picks the path:
 | `windoom-ngx-dlss3.5` | `rr` | Ray Reconstruction |
 | `windoom-ngx-dlss4` | `k` | Super Resolution, preset K |
 | `windoom-ngx-dlss4.5` | `l` | Super Resolution, preset L |
-| `windoom-ngx-dlss5` | `dlss5` | Same SR as 4.5; then DLSS 5 NR if RenoDX is present |
+| `windoom-ngx-dlss5` | `dlss5` | Same SR as 4.5; optional loaded-addon DLAA, external NR unverified |
 
-Overrides (optional): `-ngx-rr`, `-ngx-k`, `-ngx-l`. Skip NGX:
-`.\play-windoom.cmd --ngx-dlss4 -nodlss`.
+Overrides (optional): `-ngx-rr`, `-ngx-k`, `-ngx-l`. Skip NGX (independent of future RT controls):
+`.\play-windoom.cmd --ngx-dlss4 -nodlss`. `-nosr` is an equivalent explicit SR switch.
 
 Input is 320x200, output 1280x800, no jitter. The status bar is
 copied on after DLSS so it stays sharp.
@@ -24,10 +24,12 @@ copied on after DLSS so it stays sharp.
 ## 4 / 4.5 / 5
 
 4 and 4.5 are one Super Resolution pass (320→1280). 5 does that
-**same** 4.5 pass first (preset L). If `renodx-dlss5.addon64` sits
-next to the exe, a second pass (DLAA) runs on that image so Swapper
-NR can refine it. Color for that pass is never a nearest 4x stretch.
-Without the addon, the 5 folder looks like 4.5.
+**same** 4.5 pass first (preset L). A second pass (DLAA) is requested only
+if the `renodx-dlss5.addon64` module is actually loaded by the optional external
+integration. File presence alone does not enable it. Color for that pass is
+never a nearest 4x stretch. Logs distinguish the addon file, loaded module,
+actual SR/DLAA evaluations and external NR activation, which remains
+unverified by this program. Without a loaded addon, the 5 folder uses official SR.
 
 ## Ray Reconstruction (3.5)
 
@@ -109,3 +111,43 @@ powershell -NoProfile -File scripts/test-fetch-ngx.ps1 -SeedCache build-win/_ngx
 The tests preserve their temporary directory and transcript for review. They
 check first install, complete cache reuse, legacy upgrade, SR/RR deployment,
 rollback/restore, corrupt cache and backup, download failure, and an in-use DLL.
+
+
+## Loaded identity and failure diagnostics
+
+Startup distinguishes the SDK release/commit used to compile, deployment receipt,
+DLL file resource version, requested preset, feature, and fixed input/output sizes.
+The `NGX loaded:` record enumerates a module loaded by NGX itself, reads its actual
+Windows path, version and SHA256, and compares that hash with `ngx-install.json`.
+The local-file preflight is explicitly labelled as preparation; it never counts
+as evaluation. Missing/invalid receipts or mismatches are reported without
+misidentifying the loaded DLL as the installed version.
+
+`present mode: ngx-pending` means NGX has initialized but has not evaluated yet.
+`NGX presented:` and the actual `present mode:` transition appear only after the
+frame's evaluation/display choice is known. Shutdown records successful/failed SR
+evaluation counts. Missing or incompatible local SR DLLs, unavailable capabilities,
+old drivers and initialization/creation/evaluation errors retain the ordinary
+nearest display path. A failed SR evaluation disables further SR attempts for
+that process; resources remain owned until the renderer's normal GPU-safe shutdown.
+
+The first latest-runtime RTX acceptance confirmed 320x200 to 1280x800 creation and
+successful evaluation with DLL 310.9.1.0, even though the optimal-settings query
+advertised 427x267. This observation is specific to that tested runtime/driver;
+creation/evaluation remains authoritative and errors still fall back. Preset
+requests do not imply configurable scene resolution or complete quality modes.
+
+To capture repeatable acceptance from a confirmed interactive console, use
+`tools/capture-ngx-runtime.ps1` with an executable, verified SDK, matching IWAD,
+external demo and a new output directory. It compares failure/off PNGs at equal
+`game_tic` values, preserves per-case module logs/CSVs/frames, and can include an
+executable whose SDK/runtime were actually restored using the installer.
+
+Failure acceptance builds opt in with `-DWINDOOM_NGX_DIAGNOSTICS=ON`; the ordinary
+build defaults to OFF. Only those diagnostic builds accept `-ngx-fail init`,
+`capability`, `create`, `evaluate`, or `evaluate-late` (three successful evaluations,
+then failure). These are explicitly synthetic API results. They exercise the
+same game's production fallback path and do not impersonate a physical GPU or
+driver fault. Missing/incompatible DLL scenarios use actual loader failures.
+No driver, system DLL, injection component or security setting is installed by
+this capture tool.

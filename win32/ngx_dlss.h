@@ -7,6 +7,8 @@ extern "C" {
 #endif
 
 int  Ngx_Wanted(void);
+/* Call once per frame after the chosen NGX output is known. */
+void Ngx_RecordPresented(int used_ngx, const char *fallback_mode);
 int  Ngx_Init(void *device, void *queue);
 void Ngx_Shutdown(void);
 int  Ngx_Ready(void);
