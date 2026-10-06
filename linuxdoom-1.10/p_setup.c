@@ -44,6 +44,9 @@ rcsid[] = "$Id: p_setup.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
 #include "s_sound.h"
 
 #include "doomstat.h"
+#ifdef _WIN32
+#include "dxr_map.h"
+#endif
 
 
 void	P_SpawnMapThing (mapthing_t*	mthing);
@@ -603,6 +606,10 @@ P_SetupLevel
     // will be set by player think.
     players[consoleplayer].viewz = 1; 
 
+    // GPU snapshots must stop using the old level before PU_LEVEL is freed.
+#ifdef _WIN32
+    DxrMap_Unload();
+#endif
     // Make sure all sounds are stopped before Z_FreeTags.
     S_Start ();			
 
@@ -688,6 +695,10 @@ P_SetupLevel
     if (precache)
 	R_PrecacheLevel ();
 
+#ifdef _WIN32
+    // Actual extraction waits for the first scene after savegame unarchive.
+    DxrMap_LevelLoaded(lumpname);
+#endif
     //printf ("free memory: 0x%x\n", Z_FreeMemory());
 
 }
@@ -703,6 +714,5 @@ void P_Init (void)
     P_InitPicAnims ();
     R_InitSprites (sprnames);
 }
-
 
 

@@ -81,6 +81,9 @@ add_executable(windoom
   win32/frame_trace.c
   win32/gbuffer.c
   win32/dxr_diagnostic.cpp
+  win32/dxr_map.cpp
+  win32/map_mesh.cpp
+  win32/map_source.c
   win32/render_adapter.c
   win32/gpu_timing.c
   win32/i_main_win.c
@@ -246,6 +249,14 @@ if(WINDOOM_DXR)
       DEPENDS win32/shaders/dxr/diagnostic.hlsl VERBATIM)
     add_custom_target(windoom_dxr_shader DEPENDS "${_wd_dxr_shader}")
     add_dependencies(windoom windoom_dxr_shader)
+    set(_wd_map_shader "${_wd_runtime_dir}/shaders/dxr_map.cso")
+    add_custom_command(OUTPUT "${_wd_map_shader}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_wd_runtime_dir}/shaders"
+      COMMAND "${DXC_EXECUTABLE}" -T cs_6_5 -E main -O3
+        -Fo "${_wd_map_shader}" "${CMAKE_CURRENT_SOURCE_DIR}/win32/shaders/dxr/map.hlsl"
+      DEPENDS win32/shaders/dxr/map.hlsl win32/shaders/dxr/scene-hit.hlsli VERBATIM)
+    add_custom_target(windoom_map_shader DEPENDS "${_wd_map_shader}")
+    add_dependencies(windoom windoom_map_shader)
     message(STATUS "DXR diagnostic DXC: ${DXC_EXECUTABLE}")
   else()
     message(STATUS "DXC absent; normal rendering works, DXR diagnostic shader unavailable")

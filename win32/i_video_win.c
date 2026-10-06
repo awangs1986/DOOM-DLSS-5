@@ -29,6 +29,7 @@
 #include "png_export.h"
 #include "gpu_timing.h"
 #include "dxr_diagnostic.h"
+#include "dxr_map.h"
 #include "render_adapter.h"
 #include "frame_trace.h"
 
@@ -217,6 +218,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 	grab_mouse(0);
 	return 0;
       case WM_KEYDOWN:
+	if (wparam == VK_F5 && (M_CheckParm("-rt-map-depth") || M_CheckParm("-rt-map-normal")))
+	{
+	    if (!(lparam & (1L << 30))) DxrMap_Toggle();
+	    return 0;
+	}
 	if (wparam == VK_F5 && M_CheckParm("-rt-diagnostic"))
 	{
 	    if (!(lparam & (1L << 30))) DxrDiag_Toggle();
@@ -972,6 +978,7 @@ void I_FinishUpdate(void)
     wait_gpu();
     GpuTiming_Collect();
     DxrDiag_Prepare();
+    DxrMap_Prepare();
     idx = IDXGISwapChain3_GetCurrentBackBufferIndex(g_swap);
     ID3D12CommandAllocator_Reset(g_alloc);
     ID3D12GraphicsCommandList_Reset(g_cmd, g_alloc, NULL);
@@ -1106,6 +1113,8 @@ void I_FinishUpdate(void)
 
     /* Diagnostic intentionally replaces the full view, including 2D overlays. */
     DxrDiag_Render(g_cmd, g_bb[idx]);
+    /* Real-map diagnostics replace world coverage, preserving #9 overlays. */
+    DxrMap_Render(g_cmd, g_bb[idx]);
     GpuTiming_Mark(g_cmd, 3);
     if (g_export_dir)
     {
@@ -1160,6 +1169,7 @@ void I_ShutdownGraphics(void)
     GpuTiming_Collect();
     GpuTiming_Shutdown();
     DxrDiag_Shutdown();
+    DxrMap_Shutdown();
     Png_Shutdown();
     Anime4K_Shutdown();
     Fsr2_Shutdown();
@@ -1277,7 +1287,9 @@ void I_InitGraphics(void)
 
     init_d3d(g_hwnd);
     DxrDiag_Init(g_dev, g_queue, WIN_W, WIN_H,
-                 M_CheckParm("-rt-diagnostic") != 0, M_CheckParm("-nort") != 0);
+                 M_CheckParm("-rt-diagnostic") != 0 && !M_CheckParm("-rt-map-depth") && !M_CheckParm("-rt-map-normal"), M_CheckParm("-nort") != 0);
+    DxrMap_Init(g_dev, g_queue, WIN_W, WIN_H,
+                M_CheckParm("-rt-map-normal") ? 2 : (M_CheckParm("-rt-map-depth") ? 1 : 0), M_CheckParm("-nort") != 0);
     if (Ngx_Wanted())
 	Ngx_Init(g_dev, g_queue);
     else
