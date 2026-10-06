@@ -24,6 +24,9 @@ static const char
 rcsid[] = "$Id: hu_lib.c,v 1.3 1997/01/26 07:44:58 b1 Exp $";
 
 #include <ctype.h>
+#ifdef _WIN32
+#include "language.h"
+#endif
 
 #include "doomdef.h"
 
@@ -111,7 +114,7 @@ HUlib_drawTextLine
     x = l->x;
     for (i=0;i<l->len;i++)
     {
-	c = toupper(l->l[i]);
+	c = toupper((unsigned char)l->l[i]);
 	if (c != ' '
 	    && c >= l->sc
 	    && c <= '_')
@@ -219,6 +222,11 @@ HUlib_addMessageToSText
   char*		prefix,
   char*		msg )
 {
+#ifdef _WIN32
+    char display[HU_MAXLINELENGTH + 1];
+    Lang_MenuText(msg, display, sizeof(display), HU_MAXLINELENGTH, 1);
+    msg = display;
+#endif
     HUlib_addLineToSText(s);
     if (prefix)
 	while (*prefix)

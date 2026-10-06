@@ -533,8 +533,12 @@ void M_ReadSaveStrings(void)
 	    continue;
 	}
 	count = read (handle, &savegamestrings[i], SAVESTRINGSIZE);
-	close (handle);
-	LoadMenu[i].status = 1;
+        close(handle);
+        savegamestrings[i][SAVESTRINGSIZE - 1] = 0;
+        if (count != SAVESTRINGSIZE) {
+            strcpy(savegamestrings[i], EMPTYSTRING);
+            LoadMenu[i].status = 0;
+        } else LoadMenu[i].status = 1;
     }
 }
 
@@ -679,7 +683,7 @@ void M_SaveGame (int choice)
 //
 //      M_QuickSave
 //
-char    tempstring[80];
+char    tempstring[256];
 
 void M_QuickSaveResponse(int ch)
 {
@@ -709,7 +713,15 @@ void M_QuickSave(void)
 	quickSaveSlot = -2;	// means to pick a slot now
 	return;
     }
-    sprintf(tempstring,QSPROMPT,savegamestrings[quickSaveSlot]);
+#ifdef _WIN32
+    {
+        char diag[160];
+        Lang_SaveMessage(0, savegamestrings[quickSaveSlot], tempstring, sizeof(tempstring), diag, sizeof(diag));
+        if (diag[0]) fprintf(stderr, "Language: %s\n", diag);
+    }
+#else
+    snprintf(tempstring, sizeof(tempstring), QSPROMPT, savegamestrings[quickSaveSlot]);
+#endif
     M_StartMessage(tempstring,M_QuickSaveResponse,true);
 }
 
@@ -741,7 +753,15 @@ void M_QuickLoad(void)
 	M_StartMessage(QSAVESPOT,NULL,false);
 	return;
     }
-    sprintf(tempstring,QLPROMPT,savegamestrings[quickSaveSlot]);
+#ifdef _WIN32
+    {
+        char diag[160];
+        Lang_SaveMessage(1, savegamestrings[quickSaveSlot], tempstring, sizeof(tempstring), diag, sizeof(diag));
+        if (diag[0]) fprintf(stderr, "Language: %s\n", diag);
+    }
+#else
+    snprintf(tempstring, sizeof(tempstring), QLPROMPT, savegamestrings[quickSaveSlot]);
+#endif
     M_StartMessage(tempstring,M_QuickLoadResponse,true);
 }
 
@@ -955,11 +975,25 @@ void M_DrawOptions(void)
 {
     V_DrawPatchDirect (108,15,0,W_CacheLumpName("M_OPTTTL",PU_CACHE));
 	
+#ifdef _WIN32
+    if (Lang_HasTranslation(detailLevel ? "option.detail.low" : "option.detail.high")) {
+        char label[20];
+        Lang_MenuText(Lang_Text(detailLevel ? "option.detail.low" : "option.detail.high"), label, sizeof(label), 8, 1);
+        M_WriteText(OptionsDef.x + 175, OptionsDef.y + LINEHEIGHT * detail, label);
+    } else
+#endif
     V_DrawPatchDirect (OptionsDef.x + 175,OptionsDef.y+LINEHEIGHT*detail,0,
-		       W_CacheLumpName(detailNames[detailLevel],PU_CACHE));
+                       W_CacheLumpName(detailNames[detailLevel],PU_CACHE));
 
+#ifdef _WIN32
+    if (Lang_HasTranslation(showMessages ? "option.state.on" : "option.state.off")) {
+        char label[20];
+        Lang_MenuText(Lang_Text(showMessages ? "option.state.on" : "option.state.off"), label, sizeof(label), 12, 1);
+        M_WriteText(OptionsDef.x + 120, OptionsDef.y + LINEHEIGHT * messages, label);
+    } else
+#endif
     V_DrawPatchDirect (OptionsDef.x + 120,OptionsDef.y+LINEHEIGHT*messages,0,
-		       W_CacheLumpName(msgNames[showMessages],PU_CACHE));
+                       W_CacheLumpName(msgNames[showMessages],PU_CACHE));
 
     M_DrawThermo(OptionsDef.x,OptionsDef.y+LINEHEIGHT*(mousesens+1),
 		 10,mouseSensitivity);
@@ -984,10 +1018,14 @@ void M_ChangeMessages(int choice)
     choice = 0;
     showMessages = 1 - showMessages;
 	
+#ifdef _WIN32
+    players[consoleplayer].message = (char *)Lang_Text(showMessages ? "option.messages.on" : "option.messages.off");
+#else
     if (!showMessages)
-	players[consoleplayer].message = MSGOFF;
+        players[consoleplayer].message = MSGOFF;
     else
-	players[consoleplayer].message = MSGON ;
+        players[consoleplayer].message = MSGON;
+#endif
 
     message_dontfuckwithme = true;
 }
@@ -1239,7 +1277,15 @@ M_StartMessage
 {
     messageLastMenuActive = menuactive;
     messageToPrint = 1;
+#ifdef _WIN32
+    {
+        static char display[256];
+        Lang_MenuText(string, display, sizeof(display), 30, 8);
+        messageString = display;
+    }
+#else
     messageString = string;
+#endif
     messageRoutine = routine;
     messageNeedsInput = input;
     menuactive = true;
@@ -1264,7 +1310,12 @@ int M_StringWidth(char* string)
     int             i;
     int             w = 0;
     int             c;
-	
+#ifdef _WIN32
+    char display[LANG_MAX_VALUE + 1];
+    Lang_MenuText(string, display, sizeof(display), LANG_MAX_VALUE, 1);
+    string = display;
+#endif
+
     for (i = 0;i < strlen(string);i++)
     {
 	c = toupper((unsigned char)string[i]) - HU_FONTSTART;
@@ -1313,7 +1364,16 @@ M_WriteText
     int		cy;
 		
 
+#ifdef _WIN32
+    {
+        /* Conversion is shared with measurement; raw UTF-8 is never cased. */
+        static char display[LANG_MAX_VALUE + 1];
+        Lang_MenuText(string, display, sizeof(display), LANG_MAX_VALUE, 16);
+        ch = display;
+    }
+#else
     ch = string;
+#endif
     cx = x;
     cy = y;
 	
@@ -1606,7 +1666,15 @@ boolean M_Responder (event_t* ev)
 	    usegamma++;
 	    if (usegamma > 4)
 		usegamma = 0;
-	    players[consoleplayer].message = gammamsg[usegamma];
+#ifdef _WIN32
+            {
+                char key[32];
+                snprintf(key, sizeof(key), "option.gamma.%d", usegamma);
+                players[consoleplayer].message = (char *)Lang_Text(key);
+            }
+#else
+            players[consoleplayer].message = gammamsg[usegamma];
+#endif
 	    I_SetPalette (W_CacheLumpName ("PLAYPAL",PU_CACHE));
 	    return true;
 				
@@ -1793,8 +1861,15 @@ void M_Drawer (void)
 
     for (i=0;i<max;i++)
     {
-	if (currentMenu->menuitems[i].name[0])
-	    V_DrawPatchDirect (x,y,0,
+#ifdef _WIN32
+        if (currentMenu == &OptionsDef && i == messages && Lang_HasTranslation("menu.messages")) {
+            char label[32];
+            Lang_MenuText(Lang_Text("menu.messages"), label, sizeof(label), 13, 1);
+            M_WriteText(x, y, label);
+        } else
+#endif
+        if (currentMenu->menuitems[i].name[0])
+            V_DrawPatchDirect (x,y,0,
 			       W_CacheLumpName(currentMenu->menuitems[i].name ,PU_CACHE));
 	y += LINEHEIGHT;
     }

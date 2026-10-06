@@ -2,7 +2,7 @@
 
 启动参数 `-lang es-ascii` 加载程序所在目录的 `languages/es-ascii.ini`，替换退出确认提示。成功选择写入同目录 `language.cfg`，下次启动沿用；`-lang en` 恢复内建英文。优先级为启动参数、保存选择、英文。语言只在启动时加载；重新选择需重启。文件查找与启动工作目录无关。程序目录不可写时，本次选择仍有效，日志报告保存失败。
 
-首版只迁移 `quit.prompt` 和 `quit.confirm`；其他文字继续使用原定义，菜单图像未替换。退出键保持 Y，示例也据此提示。UTF-8 文件加载并不提供中文字体。原 DOOM 字体显示可打印 ASCII，小写使用已有大写字形；退出提示将每个不支持的 UTF-8 字符显示为一个 `?`，换行、限定行数和截断保障安全。示例西班牙语使用 ASCII，不带重音。
+首版迁移退出、Messages 开关反馈、gamma 提示、物品拾取反馈和快速保存/加载确认。Options 菜单的 Messages 项、开关值和细节档标签在对应译文存在时走文字绘制入口；缺键和英文默认仍使用原菜单图片。菜单位置、选择键、选择行为与其他图片保持原样。退出键保持 Y，示例也据此提示。UTF-8 文件加载并不提供中文字体。原 DOOM 字体显示空格、`!` 到 `_` 以及英文字母，小写使用已有大写字形；菜单和 HUD 文字将每个不支持的 UTF-8 字符显示为一个 `?`，换行、限定行数和截断保障安全。示例西班牙语使用 ASCII，不带重音。
 
 ## 格式
 
@@ -36,3 +36,32 @@ cc -std=c99 -Wall -Wextra -Werror -fsanitize=address,undefined -Ilinuxdoom-1.10 
 cc -std=c99 -Wall -Wextra -Werror -Ilinuxdoom-1.10 linuxdoom-1.10/language.c tests/language_startup.c -o /tmp/windoom-language-startup
 python3 tests/test_language_startup.py /tmp/windoom-language-startup
 ```
+
+## 已迁移键与消费者
+
+| 文字 | 稳定键 | 行为 |
+| --- | --- | --- |
+| 退出正文、确认 | `quit.prompt`、`quit.confirm` | 实际退出弹窗 |
+| Messages 菜单项 | `menu.messages` | 对应译文存在时使用原字体，最多 13 字符；其他菜单项仍绘制原图片 |
+| Messages 开关反馈 | `option.messages.on`、`option.messages.off` | 点击选项或 F8 后的实际 HUD 提示 |
+| 开关标签 | `option.state.on`、`option.state.off` | Options 菜单状态文字，最多 12 字符 |
+| 细节标签 | `option.detail.high`、`option.detail.low` | Options 菜单标签，最多 8 字符；原代码的 low detail 渲染仍未实现 |
+| gamma 提示 | `option.gamma.0` 到 `option.gamma.4` | F11 切换后的实际提示 |
+| 快速保存、加载 | `quicksave.prompt`、`quickload.prompt`、`prompt.yes_no` | 实际保存名称作为受限 TEXT 参数，退出/确认键未修改 |
+| 所有拾取反馈 | `pickup.*`（见下表） | 保持原拾取规则与副作用，仅替换提示 |
+
+拾取键的后缀为：`armor`、`mega_armor`、`health_bonus`、`armor_bonus`、`supercharge`、`mega_sphere`、`blue_card`、`yellow_card`、`red_card`、`blue_skull`、`yellow_skull`、`red_skull`、`stimpack`、`medikit_needed`、`medikit`、`invulnerability`、`berserk`、`invisibility`、`radiation_suit`、`map`、`light_visor`、`clip`、`clip_box`、`rocket`、`rocket_box`、`cell`、`cell_box`、`shells`、`shell_box`、`backpack`、`bfg`、`chaingun`、`chainsaw`、`launcher`、`plasma`、`shotgun`、`super_shotgun`。
+
+未迁移文字包括其他菜单图片/标题、关卡和剧情、地图名称、聊天宏、门锁提示、普通保存完成提示、网络/新游戏/难度错误提示和存档槽名称输入。原英文宏仍可供静态初始化与历史 Linux 构建使用。首版不扩展聊天或存档名称的输入字符范围。
+
+## 受限模板
+
+仅 `quicksave.prompt`、`quickload.prompt` 接受模板；声明一个名为 `save_name`、类型为 TEXT 的参数，模板必须恰好包含一次 `{save_name}`。`{{` 和 `}}` 显示字面花括号。百分号没有格式意义，所以 `%s`、`%n` 等均按普通文本复制，参数内容中的花括号也不会再次解释。
+
+公开 `Lang_Format` 校验参数名、数量、类型、UTF-8 和长度（最多 128 字节），拒绝控制字符。译文模板错误时回退英文模板并保留有效存档名；参数错误时回退英文并显示 `<unknown save>`，输出明确诊断。输出截断只发生在完整 UTF-8 码点边界。游戏的 `Lang_SaveMessage` 单独保留正文与 Y/N 提示的空间，长正文不能吞掉确认说明。`M_StartMessage` 拥有稳定的显示副本，最多八行、每行 30 字符；HUD 使用相同字体转换，最多一行，不将原始 UTF-8 逐字节大写。
+
+## 消费者验证
+
+`python3 tests/test_language_consumers.py` 使用 GCC 构建真实 `M_ChangeMessages`、`P_TouchSpecialThing`、HUD 和菜单提示/文字消费者，在隔离目录用英文与示例包验证选项切换、拾取规则和反馈、UTF-8 缺字一致性、长提示长度与显示副本的生命周期。仅平台声音/绘制输出与对象释放在链接处替换；不复制引擎实现。启用 ASan/UBSan 的堆栈/堆检查，关闭全局 ASan 注册以允许链接器裁掉无关引擎功能。
+
+Windows 实际游戏验收：用 `-lang es-ascii` 启动，打开 Options 检查 `MENSAJES` 和 `SI/NO`，按 F8/F11 检查译文反馈；进入地图拾取护甲/血瓶/弹药，检查提示和游戏状态。建立名称为 `MY SAVE` 的存档，再按 F6/F9，确认西班牙语正文、名称插入和 Y/N 提示，按 N 取消。重启 `-lang en` 比较默认英文。长译文/错误模板可在独立测试包中验证并保存截图，不修改正式包。实际回放与截图证据由实机验收汇总。
