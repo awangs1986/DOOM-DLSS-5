@@ -64,8 +64,10 @@ Same thing for one run:
 
        .\play-windoom.cmd --ngx-dlss5 -playdemo compare -export D:\frames\dlss5
 
-`-export` runs one game tic per frame (35 fps timeline; playback is
-just slower). PNGs match the window, including HUD and F1–F4 views.
+`-export` advances gameplay at one tic per normal frame. Transition wipes
+can export extra frames without advancing the game tic. For matched demo
+comparisons, use `-gpu-timing <new.csv>` and align its `game_tic` column;
+see [GPU baseline capture](docs/gpu-baseline.md). PNGs include HUD and F1–F4 views.
 
        ffmpeg -framerate 35 -i D:\frames\windoom-ngx-dlss5\f%06d.png -c:v libx264 -pix_fmt yuv420p dlss5.mp4
 

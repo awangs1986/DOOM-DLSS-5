@@ -17,6 +17,7 @@
 
 #include "d_event.h"
 #include "d_main.h"
+#include "doomstat.h"
 #include "i_system.h"
 #include "i_video.h"
 #include "v_video.h"
@@ -26,6 +27,7 @@
 #include "anime4k.h"
 #include "fsr2.h"
 #include "png_export.h"
+#include "gpu_timing.h"
 
 extern int viewheight;
 extern boolean singletics;
@@ -1028,9 +1030,11 @@ void I_FinishUpdate(void)
     reset = GB_ConsumeReset();
 
     wait_gpu();
+    GpuTiming_Collect();
     idx = IDXGISwapChain3_GetCurrentBackBufferIndex(g_swap);
     ID3D12CommandAllocator_Reset(g_alloc);
     ID3D12GraphicsCommandList_Reset(g_cmd, g_alloc, NULL);
+    GpuTiming_Begin(g_cmd, gametic);
 
     barrier(g_tex_color, &g_st_color, D3D12_RESOURCE_STATE_COPY_DEST);
     barrier(g_tex_depth, &g_st_depth, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -1045,6 +1049,7 @@ void I_FinishUpdate(void)
     upload_tex(g_tex_velocity, g_up_velocity, GB_VelocityRG(),
 	       GB_WIDTH, GB_HEIGHT, 8, DXGI_FORMAT_R32G32_FLOAT);
 
+    GpuTiming_Mark(g_cmd, 1);
     if (Ngx_Ready() && Ngx_ShowEvalOutput() &&
 	GB_GetDebugView() == GB_VIEW_COLOR &&
 	GB_HasScenePixels())
@@ -1135,6 +1140,7 @@ void I_FinishUpdate(void)
 	used_a4k = Anime4K_Evaluate(g_cmd, g_tex_color, g_tex_out);
     }
 
+    GpuTiming_Mark(g_cmd, 2);
     if (used_ngx || used_a4k || used_fsr2)
     {
 	int hud_y = (SCREENHEIGHT - 32) * WIN_SCALE;
@@ -1159,6 +1165,7 @@ void I_FinishUpdate(void)
 	    blit_statusbar(g_bb[idx]);
     }
 
+    GpuTiming_Mark(g_cmd, 3);
     if (g_export_dir)
     {
 	barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -1166,6 +1173,7 @@ void I_FinishUpdate(void)
 			   DXGI_FORMAT_B8G8R8A8_UNORM);
     }
     barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_PRESENT);
+    GpuTiming_End(g_cmd);
     ID3D12GraphicsCommandList_Close(g_cmd);
     lists[0] = (ID3D12CommandList *)g_cmd;
     ID3D12CommandQueue_ExecuteCommandLists(g_queue, 1, lists);
@@ -1173,6 +1181,7 @@ void I_FinishUpdate(void)
     if (g_export_dir)
     {
 	wait_gpu();
+	GpuTiming_Collect();
 	export_frame_png();
     }
     IDXGISwapChain3_Present(g_swap, 0, 0);
@@ -1207,6 +1216,8 @@ void I_ShutdownGraphics(void)
     wait_gpu();
     if (g_export_frame > 0)
 	fprintf(stderr, "export: %d frames written\n", g_export_frame);
+    GpuTiming_Collect();
+    GpuTiming_Shutdown();
     Png_Shutdown();
     Anime4K_Shutdown();
     Fsr2_Shutdown();
@@ -1320,6 +1331,11 @@ void I_InitGraphics(void)
 	Fsr2_Init(g_dev);
     if (!Ngx_Ready() && !Fsr2_Ready())
 	Anime4K_Init(g_dev);
+    {
+        int timing_arg = M_CheckParm("-gpu-timing");
+        if (timing_arg && timing_arg < myargc - 1)
+            GpuTiming_Init(g_dev, g_queue, myargv[timing_arg + 1], g_export_dir != NULL);
+    }
     ShowWindow(g_hwnd, SW_SHOW);
     UpdateWindow(g_hwnd);
     grab_mouse(1);
