@@ -155,7 +155,7 @@ void R_DrawColumn (void)
     // Determine scaling,
     //  which is the only mapping to be done.
     fracstep = dc_iscale; 
-    frac = dc_texturemid + (dc_yl-centery)*fracstep; 
+    frac = dc_texturemid + FixedMul((dc_yl << FRACBITS) - centeryfrac, fracstep);
 
     // Inner loop that does the actual texture mapping,
     //  e.g. a DDA-lile scaling.
@@ -200,7 +200,7 @@ void R_DrawColumn (void)
     dest = ylookup[dc_yl] + columnofs[dc_x];  
 	 
     fracstep = dc_iscale<<9; 
-    frac = (dc_texturemid + (dc_yl-centery)*dc_iscale)<<9; 
+    frac = (dc_texturemid + FixedMul((dc_yl << FRACBITS) - centeryfrac, dc_iscale))<<9;
  
     fracstep2 = fracstep+fracstep;
     fracstep3 = fracstep2+fracstep;
@@ -260,7 +260,7 @@ void R_DrawColumnLow (void)
     dest2 = ylookup[dc_yl] + columnofs[(dc_x << 1) + 1];
     
     fracstep = dc_iscale; 
-    frac = dc_texturemid + (dc_yl-centery)*fracstep;
+    frac = dc_texturemid + FixedMul((dc_yl << FRACBITS) - centeryfrac, fracstep);
     
     do 
     {
@@ -368,7 +368,7 @@ void R_DrawFuzzColumn (void)
 
     // Looks familiar.
     fracstep = dc_iscale; 
-    frac = dc_texturemid + (dc_yl-centery)*fracstep; 
+    frac = dc_texturemid + FixedMul((dc_yl << FRACBITS) - centeryfrac, fracstep);
 
     // Looks like an attempt at dithering,
     //  using the colormap #6 (of 0-31, a bit
@@ -450,7 +450,7 @@ void R_DrawTranslatedColumn (void)
 
     // Looks familiar.
     fracstep = dc_iscale; 
-    frac = dc_texturemid + (dc_yl-centery)*fracstep; 
+    frac = dc_texturemid + FixedMul((dc_yl << FRACBITS) - centeryfrac, fracstep);
 
     // Here we do an additional index re-mapping.
     do 

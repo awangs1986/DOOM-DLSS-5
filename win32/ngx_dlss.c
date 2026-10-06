@@ -15,6 +15,7 @@
 #include <stdbool.h>
 #include <d3d12.h>
 #include "ngx_runtime.h"
+#include "gbuffer.h"
 
 #include <nvsdk_ngx.h>
 #include <nvsdk_ngx_defs.h>
@@ -770,14 +771,14 @@ static int ngx_eval_sr(ID3D12GraphicsCommandList *cl,
     ev.Feature.pInOutput = output;
     ev.pInDepth = depth;
     ev.pInMotionVectors = velocity;
-    ev.InJitterOffsetX = 0.0f;
-    ev.InJitterOffsetY = 0.0f;
+    ev.InJitterOffsetX = GB_GetFrameInputs()->jitter_x;
+    ev.InJitterOffsetY = GB_GetFrameInputs()->jitter_y;
     ev.InReset = reset ? 1 : 0;
     ev.InRenderSubrectDimensions.Width = 320;
     ev.InRenderSubrectDimensions.Height = 200;
     ev.InMVScaleX = 1.0f;
     ev.InMVScaleY = 1.0f;
-    ev.InFrameTimeDeltaInMsec = 1000.0f / 35.0f;
+    ev.InFrameTimeDeltaInMsec = GB_GetFrameInputs()->frame_delta_ms;
 
     r = ngx_inject("evaluate") ? NVSDK_NGX_Result_Fail :
         NGX_D3D12_EVALUATE_DLSS_EXT(cl, g_handle, g_params, &ev);
@@ -810,8 +811,8 @@ static int ngx_eval_dlaa(ID3D12GraphicsCommandList *cl,
     ev.Feature.pInOutput = output;
     ev.pInDepth = depth;
     ev.pInMotionVectors = velocity;
-    ev.InJitterOffsetX = 0.0f;
-    ev.InJitterOffsetY = 0.0f;
+    ev.InJitterOffsetX = GB_GetFrameInputs()->jitter_x;
+    ev.InJitterOffsetY = GB_GetFrameInputs()->jitter_y;
     ev.InReset = reset ? 1 : 0;
     ev.InRenderSubrectDimensions.Width = 1280;
     ev.InRenderSubrectDimensions.Height = 800;
@@ -822,7 +823,7 @@ static int ngx_eval_dlaa(ID3D12GraphicsCommandList *cl,
     }
     ev.InMVScaleX = 4.0f;
     ev.InMVScaleY = 4.0f;
-    ev.InFrameTimeDeltaInMsec = 1000.0f / 35.0f;
+    ev.InFrameTimeDeltaInMsec = GB_GetFrameInputs()->frame_delta_ms;
 
     r = NGX_D3D12_EVALUATE_DLSS_EXT(cl, g_handle_dlaa, g_params, &ev);
     if (NVSDK_NGX_FAILED(r))
@@ -859,14 +860,14 @@ static int ngx_eval_rr(ID3D12GraphicsCommandList *cl,
     ev.pInDiffuseAlbedo = color;
     ev.pInSpecularAlbedo = g_tex_spec;
     ev.pInRoughness = g_tex_rough;
-    ev.InJitterOffsetX = 0.0f;
-    ev.InJitterOffsetY = 0.0f;
+    ev.InJitterOffsetX = GB_GetFrameInputs()->jitter_x;
+    ev.InJitterOffsetY = GB_GetFrameInputs()->jitter_y;
     ev.InReset = reset ? 1 : 0;
     ev.InRenderSubrectDimensions.Width = 320;
     ev.InRenderSubrectDimensions.Height = 200;
     ev.InMVScaleX = 1.0f;
     ev.InMVScaleY = 1.0f;
-    ev.InFrameTimeDeltaInMsec = 1000.0f / 35.0f;
+    ev.InFrameTimeDeltaInMsec = GB_GetFrameInputs()->frame_delta_ms;
 
     r = NGX_D3D12_EVALUATE_DLSSD_EXT(cl, g_handle, g_params, &ev);
     if (NVSDK_NGX_FAILED(r))

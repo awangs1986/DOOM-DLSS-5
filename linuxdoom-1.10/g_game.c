@@ -477,7 +477,7 @@ void G_DoLoadLevel (void)
 	wipegamestate = -1;             // force a wipe 
 
 #ifdef _WIN32
-    GB_RequestReset();
+    GB_RequestResetReason(GB_RESET_LEVEL);
 #endif
 
     gamestate = GS_LEVEL; 
@@ -1255,6 +1255,9 @@ void G_DoLoadGame (void)
     if (setsizeneeded)
 	R_ExecuteSetViewSize ();
     
+#ifdef _WIN32
+    GB_RequestResetReason(GB_RESET_LOAD);
+#endif
     // draw the pattern into the back screen
     R_FillBackScreen ();   
 } 

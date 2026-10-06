@@ -77,6 +77,8 @@ set(DOOM_SOURCES
 
 add_executable(windoom
   ${DOOM_SOURCES}
+  win32/frame_inputs.c
+  win32/frame_trace.c
   win32/gbuffer.c
   win32/dxr_diagnostic.cpp
   win32/render_adapter.c
