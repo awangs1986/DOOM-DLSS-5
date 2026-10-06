@@ -57,6 +57,9 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #include "f_finale.h"
 #include "f_wipe.h"
 
+#ifdef _WIN32
+#include "language.h"
+#endif
 #include "m_argv.h"
 #include "m_misc.h"
 #include "m_menu.h"
@@ -860,6 +863,9 @@ void D_DoomMain (void)
     char                    file[256];
 
     FindResponseFile ();
+#ifdef _WIN32
+    Lang_InitGame ();
+#endif
 	
     IdentifyVersion ();
 	
