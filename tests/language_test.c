@@ -92,6 +92,40 @@ int main(void)
     Lang_QuitMessage(menu, sizeof(menu));
     assert(strstr(menu, "are you sure you want to"));
     assert(strstr(menu, "(press y to quit)"));
+    {
+        char diag[160], formatted[256];
+        lang_arg_t arg = {"save_name", LANG_ARG_TEXT, "SLOT%N{literal}"};
+        lang_arg_t wrong = {"save_name", LANG_ARG_NUMBER, "1"};
+        assert(Lang_Format("quicksave.prompt", &arg, 1, formatted, sizeof(formatted), diag, sizeof(diag)));
+        assert(!strcmp(formatted, "quicksave over your game named\n\n'SLOT%N{literal}'?"));
+        assert(!diag[0]);
+        assert(!Lang_Format("quicksave.prompt", NULL, 0, formatted, sizeof(formatted), diag, sizeof(diag)));
+        assert(strstr(formatted, "<unknown save>") && diag[0]);
+        assert(!Lang_Format("quickload.prompt", &wrong, 1, formatted, sizeof(formatted), diag, sizeof(diag)));
+        assert(strstr(formatted, "<unknown save>") && diag[0]);
+        assert(!Lang_Format("quicksave.prompt", &arg, 2, formatted, sizeof(formatted), diag, sizeof(diag)));
+        arg.name = "wrong";
+        assert(!Lang_Format("quicksave.prompt", &arg, 1, formatted, sizeof(formatted), diag, sizeof(diag)));
+        arg.name = "save_name"; arg.text = "bad\nname";
+        assert(!Lang_Format("quicksave.prompt", &arg, 1, formatted, sizeof(formatted), diag, sizeof(diag)));
+        arg.text = "\xc0\xaf";
+        assert(!Lang_Format("quicksave.prompt", &arg, 1, formatted, sizeof(formatted), diag, sizeof(diag)));
+        assert(!Lang_Format("unknown", &arg, 1, formatted, sizeof(formatted), diag, sizeof(diag)));
+        assert(!formatted[0] && diag[0]);
+        Lang_SaveMessage(0, "MY SAVE", formatted, sizeof(formatted), diag, sizeof(diag));
+        assert(strstr(formatted, "'MY SAVE'?") && strstr(formatted, "press y or n."));
+        arg.text = "ééé";
+        for (n = 1; n < 80; ++n) {
+            size_t j;
+            assert(Lang_Format("quicksave.prompt", &arg, 1, formatted, n, diag, sizeof(diag)));
+            assert(strlen(formatted) < n);
+            for (j = 0; formatted[j]; ++j) {
+                if ((unsigned char)formatted[j] == 0xc3) {
+                    assert((unsigned char)formatted[++j] == 0xa9);
+                } else assert((unsigned char)formatted[j] < 128);
+            }
+        }
+    }
     puts("language public-interface tests passed");
     return 0;
 }

@@ -1,5 +1,6 @@
 /* GPLv2; see LICENSE.TXT. Restricted, transactional UTF-8 language catalog. */
 #include "language.h"
+#include "d_englsh.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,8 +15,60 @@ static lang_catalog_t *active;
 static int started;
 static char selected[LANG_MAX_ID + 1] = "en";
 static const struct { const char *key; const char *value; } english[] = {
-    {"quit.prompt", "are you sure you want to\nquit this great game?"},
-    {"quit.confirm", "(press y to quit)"}
+    {"quit.prompt", QUITMSG},
+    {"quit.confirm", DOSY},
+    {"menu.messages", "Messages"},
+    {"option.messages.on", MSGON},
+    {"option.messages.off", MSGOFF},
+    {"option.state.on", "ON"},
+    {"option.state.off", "OFF"},
+    {"option.detail.high", "High"},
+    {"option.detail.low", "Low"},
+    {"prompt.yes_no", PRESSYN},
+    {"quicksave.prompt", "quicksave over your game named\n\n'{save_name}'?"},
+    {"quickload.prompt", "do you want to quickload the game named\n\n'{save_name}'?"},
+    {"option.gamma.0", GAMMALVL0},
+    {"option.gamma.1", GAMMALVL1},
+    {"option.gamma.2", GAMMALVL2},
+    {"option.gamma.3", GAMMALVL3},
+    {"option.gamma.4", GAMMALVL4},
+    {"pickup.armor", GOTARMOR},
+    {"pickup.mega_armor", GOTMEGA},
+    {"pickup.health_bonus", GOTHTHBONUS},
+    {"pickup.armor_bonus", GOTARMBONUS},
+    {"pickup.supercharge", GOTSUPER},
+    {"pickup.mega_sphere", GOTMSPHERE},
+    {"pickup.blue_card", GOTBLUECARD},
+    {"pickup.yellow_card", GOTYELWCARD},
+    {"pickup.red_card", GOTREDCARD},
+    {"pickup.blue_skull", GOTBLUESKUL},
+    {"pickup.yellow_skull", GOTYELWSKUL},
+    {"pickup.red_skull", GOTREDSKULL},
+    {"pickup.stimpack", GOTSTIM},
+    {"pickup.medikit_needed", GOTMEDINEED},
+    {"pickup.medikit", GOTMEDIKIT},
+    {"pickup.invulnerability", GOTINVUL},
+    {"pickup.berserk", GOTBERSERK},
+    {"pickup.invisibility", GOTINVIS},
+    {"pickup.radiation_suit", GOTSUIT},
+    {"pickup.map", GOTMAP},
+    {"pickup.light_visor", GOTVISOR},
+    {"pickup.clip", GOTCLIP},
+    {"pickup.clip_box", GOTCLIPBOX},
+    {"pickup.rocket", GOTROCKET},
+    {"pickup.rocket_box", GOTROCKBOX},
+    {"pickup.cell", GOTCELL},
+    {"pickup.cell_box", GOTCELLBOX},
+    {"pickup.shells", GOTSHELLS},
+    {"pickup.shell_box", GOTSHELLBOX},
+    {"pickup.backpack", GOTBACKPACK},
+    {"pickup.bfg", GOTBFG9000},
+    {"pickup.chaingun", GOTCHAINGUN},
+    {"pickup.chainsaw", GOTCHAINSAW},
+    {"pickup.launcher", GOTLAUNCHER},
+    {"pickup.plasma", GOTPLASMA},
+    {"pickup.shotgun", GOTSHOTGUN},
+    {"pickup.super_shotgun", GOTSHOTGUN2}
 };
 
 static void diagnostic(char *dst, size_t capacity, const char *fmt, ...)
@@ -261,7 +314,7 @@ void Lang_MenuText(const char *src, char *dst, size_t capacity, size_t columns, 
             c = '?';
         }
         if (c == '\t') c = ' ';
-        if (c != '\n' && (c < 32 || c > 126)) c = '?';
+        if (c != '\n' && (c < 32 || c == 96 || c > 122)) c = '?';
         if (c == '\n' || column == columns) {
             if (line == lines) break;
             dst[out++] = '\n'; ++line; column = 0;
@@ -279,6 +332,120 @@ void Lang_QuitMessage(char *dst, size_t capacity)
     if (!capacity) return;
     Lang_MenuText(Lang_Text("quit.prompt"), prompt, sizeof(prompt), 30, 5);
     Lang_MenuText(Lang_Text("quit.confirm"), confirm, sizeof(confirm), 30, 2);
+    snprintf(dst, capacity, "%s\n\n%s", prompt, confirm);
+    dst[capacity - 1] = 0;
+}
+
+int Lang_HasTranslation(const char *key) { return Lang_Lookup(active, key) != NULL; }
+
+static const char *english_text(const char *key)
+{
+    size_t i;
+    for (i = 0; i < sizeof(english) / sizeof(english[0]); ++i)
+        if (!strcmp(key, english[i].key)) return english[i].value;
+    return "";
+}
+
+/* Templates only use the save_name TEXT parameter. Escaped braces are literal.
+ * Validate completely before rendering, so a bad translated suffix cannot leak. */
+static int template_valid(const char *text)
+{
+    int found = 0;
+    while (*text) {
+        if (*text == '{') {
+            if (text[1] == '{') text += 2;
+            else if (!strncmp(text, "{save_name}", 11)) {
+                if (found++) return 0;
+                text += 11;
+            } else return 0;
+        } else if (*text == '}') {
+            if (text[1] != '}') return 0;
+            text += 2;
+        } else ++text;
+    }
+    return found == 1;
+}
+
+static size_t utf8_span(unsigned char c)
+{
+    if (c < 128) return 1;
+    if (c < 0xe0) return 2;
+    if (c < 0xf0) return 3;
+    return 4;
+}
+
+static int append_codepoint(char *dst, size_t capacity, size_t *out, const char *text)
+{
+    size_t span = utf8_span((unsigned char)*text);
+    if (span >= capacity - *out) return 0;
+    memcpy(dst + *out, text, span); *out += span;
+    return 1;
+}
+
+int Lang_Format(const char *key, const lang_arg_t *args, size_t count,
+                char *dst, size_t capacity, char *diag, size_t diag_size)
+{
+    const char *text, *parameter = "<unknown save>";
+    size_t out = 0, i;
+    int success = 1;
+    diagnostic(diag, diag_size, "");
+    if (!dst || !capacity) {
+        diagnostic(diag, diag_size, "template output buffer is empty"); return 0;
+    }
+    dst[0] = 0;
+    if (!key || (strcmp(key, "quicksave.prompt") && strcmp(key, "quickload.prompt"))) {
+        diagnostic(diag, diag_size, "unknown template key"); return 0;
+    }
+    if (count != 1 || !args || !args[0].name || strcmp(args[0].name, "save_name") ||
+        args[0].type != LANG_ARG_TEXT || !args[0].text ||
+        strlen(args[0].text) > 128 || !valid_utf8((const unsigned char *)args[0].text, strlen(args[0].text))) {
+        diagnostic(diag, diag_size, "invalid template parameter name, count, type or UTF-8");
+        success = 0;
+    } else {
+        parameter = args[0].text;
+        for (i = 0; parameter[i]; ++i) {
+            if ((unsigned char)parameter[i] < 32 || (unsigned char)parameter[i] == 127) {
+                parameter = "<unknown save>"; success = 0;
+                diagnostic(diag, diag_size, "invalid control character in template parameter"); break;
+            }
+        }
+    }
+    text = success ? Lang_Text(key) : english_text(key);
+    if (!template_valid(text)) {
+        text = english_text(key); success = 0;
+        diagnostic(diag, diag_size, "invalid translated template; using English template");
+    }
+    while (*text) {
+        if (!strncmp(text, "{save_name}", 11)) {
+            const char *p = parameter;
+            while (*p) {
+                if (!append_codepoint(dst, capacity, &out, p)) goto done;
+                p += utf8_span((unsigned char)*p);
+            }
+            text += 11;
+        } else if ((*text == '{' && text[1] == '{') || (*text == '}' && text[1] == '}')) {
+            if (!append_codepoint(dst, capacity, &out, text)) break;
+            text += 2;
+        } else {
+            if (!append_codepoint(dst, capacity, &out, text)) break;
+            text += utf8_span((unsigned char)*text);
+        }
+    }
+done:
+    dst[out] = 0;
+    return success;
+}
+
+void Lang_SaveMessage(int load, const char *save_name, char *dst, size_t capacity,
+                      char *diag, size_t diag_size)
+{
+    char body[LANG_MAX_VALUE + 129], prompt[160], confirm[64];
+    lang_arg_t arg = {"save_name", LANG_ARG_TEXT, save_name};
+    if (!capacity) return;
+    Lang_Format(load ? "quickload.prompt" : "quicksave.prompt", &arg, 1,
+                body, sizeof(body), diag, diag_size);
+    Lang_MenuText(body, prompt, sizeof(prompt), 30, 5);
+    Lang_MenuText(Lang_Text("prompt.yes_no"), confirm, sizeof(confirm), 30, 2);
     snprintf(dst, capacity, "%s\n\n%s", prompt, confirm);
     dst[capacity - 1] = 0;
 }
