@@ -20,8 +20,8 @@
 1. 核对并合入静态地图与深度修正的确切已测提交。
 2. #12：点光源硬阴影、真实未照明 albedo、线性色彩合成及共享材质／纹理基础。
 3. #13–#15：动态门／平台／地板与邻接墙更新、透明栅栏／天空、屏幕外单次反射。
-4. #16：RT 与 SR 独立开关、组合显示与失败回退（SR 失败须保留已合成 RT 画面）。
-5. #17：干净打包、图形提示语言键、完整 RTX 组合矩阵和最终审查。
+4. #16：游戏菜单内光追、超分、DLSS5 三个开关，偏好保存、真实状态、组合显示与失败回退（SR 失败须保留已合成 RT 画面）。
+5. #17：干净打包、图形菜单及状态／失败原因语言键、完整 RTX 组合与真实菜单操作验收和最终审查。
 6. 恢复 GitHub 认证后推送最终分支、更新 PR 并转为 ready；当前 PR 保持 draft。
 
 ## 恢复上下文
@@ -32,6 +32,7 @@
 - 最后成功推送：`504589b`；之后的提交保存在本地。
 - Draft PR：https://github.com/awangs1986/DOOM-DLSS-5/pull/18
 - 规格：`docs/dlss-rt-language-spec.md`
+- 菜单开关修订任务：`docs/tasks/16-rt-sr-menu.md`、`docs/tasks/17-packaging-menu-acceptance.md`；对应 GitHub #16／#17，目前待认证恢复后同步。
 - 全部任务、研究、回放证据、工作树及续做检查点：`/home/awang/tmp/doom-implementation-g6ir9es3/`
 - 先读 `pause-checkpoint.md`、`current-checkpoint.md`、`gpu-pause-checkpoint.md`、`temporal-depth-pause-checkpoint.md`；再读 `integration-acceptance-plan.md`。
 - 所有工作树和远程隔离证据目录保留；没有清理源码或用户数据。
