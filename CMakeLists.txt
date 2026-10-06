@@ -83,6 +83,7 @@ add_executable(windoom
   win32/i_system_win.c
   win32/i_video_win.c
   win32/ngx_dlss.c
+  win32/ngx_runtime.c
   win32/anime4k.c
   win32/fsr2.c
   win32/png_export.c
@@ -122,8 +123,11 @@ target_link_libraries(windoom PRIVATE
   ole32
   uuid
   windowscodecs
+  bcrypt
+  version
 )
 
+option(WINDOOM_NGX_DIAGNOSTICS "Enable explicitly labelled NGX failure injection for acceptance captures" OFF)
 option(WINDOOM_NGX "Link NVIDIA NGX (needs a local SDK; off by default)" OFF)
 option(WINDOOM_ANIME4K "Compile Anime4K Fast present path (no NVIDIA)" OFF)
 option(WINDOOM_FSR2 "Compile AMD FSR 2.2 present path (needs fetched sources)" OFF)
@@ -163,7 +167,24 @@ if(WINDOOM_NGX)
     PATH_SUFFIXES lib/Windows_x86_64/x64 lib/x64 lib)
   if(NGX_INCLUDE_DIR AND NGX_LIBRARY)
     message(STATUS "NGX enabled: ${NGX_INCLUDE_DIR}")
-    target_compile_definitions(windoom PRIVATE WINDOOM_HAS_NGX)
+    set(_ngx_build_tag "unrecorded")
+    set(_ngx_build_commit "unrecorded")
+    if(EXISTS "${NGX_INCLUDE_DIR}/../ngx-install.json")
+      file(STRINGS "${NGX_INCLUDE_DIR}/../ngx-install.json" _ngx_sdk_lines REGEX "\"(sdkTag|commit)\"")
+      foreach(_ngx_line IN LISTS _ngx_sdk_lines)
+        if(_ngx_line MATCHES "\"sdkTag\"[ ]*:[ ]*\"(v[0-9.]+)\"")
+          set(_ngx_build_tag "${CMAKE_MATCH_1}")
+        elseif(_ngx_line MATCHES "\"commit\"[ ]*:[ ]*\"([a-f0-9]+)\"")
+          set(_ngx_build_commit "${CMAKE_MATCH_1}")
+        endif()
+      endforeach()
+    endif()
+    target_compile_definitions(windoom PRIVATE WINDOOM_HAS_NGX
+      WINDOOM_NGX_BUILD_SDK_TAG="${_ngx_build_tag}"
+      WINDOOM_NGX_BUILD_SDK_COMMIT="${_ngx_build_commit}")
+    if(WINDOOM_NGX_DIAGNOSTICS)
+      target_compile_definitions(windoom PRIVATE WINDOOM_NGX_DIAGNOSTICS)
+    endif()
     target_include_directories(windoom PRIVATE ${NGX_INCLUDE_DIR})
     target_link_libraries(windoom PRIVATE ${NGX_LIBRARY})
   else()
