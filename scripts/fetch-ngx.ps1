@@ -209,9 +209,15 @@ try {
             $directory = Join-Path $Root $relative
             if (-not (Test-Path -LiteralPath $directory)) { continue }
             $runtimeSet = @($sr)
+            $staleRR = $null
             if ($name -eq 'windoom-ngx-dlss3.5') { $runtimeSet += $rr }
+            elseif (Test-Path -LiteralPath (Join-Path $directory 'nvngx_dlssd.dll') -PathType Leaf) {
+                # The legacy fetcher copied RR into all NGX modes. Remove only
+                # this managed obsolete runtime, through the backup transaction.
+                $staleRR = $relative + '/nvngx_dlssd.dll'
+            }
             $modeMetadata = [ordered]@{ schemaVersion = 1; sdkTag = $Release.sdkTag; commit = $Release.commit; source = $Release.source; architecture = 'Windows x64'; configuration = 'Release'; runtimes = $runtimeSet }
-            $changed = (-not $reuse) -or (-not (Test-Path -LiteralPath (Join-Path $directory 'ngx-install.json')))
+            $changed = ($null -ne $staleRR) -or (-not $reuse) -or (-not (Test-Path -LiteralPath (Join-Path $directory 'ngx-install.json')))
             foreach ($runtime in $runtimeSet) {
                 $target = Join-Path $directory $runtime.name
                 if (-not (Test-Path -LiteralPath $target) -or (Get-Hash $target) -ne $runtime.sha256) { $changed = $true }
@@ -223,6 +229,7 @@ try {
                 } catch { $changed = $true }
             }
             if (-not $changed) { Write-Host "Verified deployed runtimes: $name"; continue }
+            if ($staleRR) { $entries += [ordered]@{ relative = $staleRR; source = $null } }
             foreach ($runtime in $runtimeSet) {
                 $source = Join-Path $Transaction ($name + '/' + $runtime.name)
                 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $source) | Out-Null

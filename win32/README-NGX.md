@@ -65,8 +65,10 @@ The NVIDIA stable release was checked on 2026-10-06: SDK `v310.9.1`, commit
 x64 link libraries and **Windows_x86_64/rel** SR/RR DLLs directly from that
 immutable commit. Each file must match its pinned SHA256. ARM64, development
 DLLs and Frame Generation DLLs are excluded. The RR folder receives SR as its
-existing fallback plus RR; the three SR folders receive SR only. Other present
-modes are unaffected. This update alone does not enable every DLSS 5 feature.
+existing fallback plus RR; the three SR folders receive SR only. Old RR DLLs
+left there by the legacy installer are removed within the same backup transaction
+and recovered on restore. External frame generation DLLs, injectors and addons
+are preserved. Other present modes are unaffected. This update alone does not enable every DLSS 5 feature.
 
 The entry point verifies complete installations before reuse, stages every
 new file before publication and preflights exclusive access to existing files.

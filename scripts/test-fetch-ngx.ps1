@@ -56,7 +56,13 @@ try {
         New-Item -ItemType Directory -Path $directory -Force | Out-Null
         Set-Content (Join-Path $directory 'windoom.exe') 'unchanged executable'
         if ($name -like 'windoom-ngx-*') { Set-Content (Join-Path $directory 'nvngx_dlss.dll') 'old-SR' }
-        if ($name -eq 'windoom-ngx-dlss3.5') { Set-Content (Join-Path $directory 'nvngx_dlssd.dll') 'old-RR' }
+        # The original installer copied both SR and RR into every NGX folder.
+        if ($name -like 'windoom-ngx-*') { Set-Content (Join-Path $directory 'nvngx_dlssd.dll') 'old-RR' }
+        if ($name -eq 'windoom-ngx-dlss5') {
+            Set-Content (Join-Path $directory 'nvngx_dlssg.dll') 'external-frame-generation'
+            Set-Content (Join-Path $directory 'dxgi.dll') 'external-injector'
+            Set-Content (Join-Path $directory 'renodx-dlss5.addon64') 'external-addon'
+        }
     }
     $oldSnapshot = Snapshot
     $null = Run-Fetch @('-Offline')
@@ -66,15 +72,31 @@ try {
         Assert ((Hash $dll).ToLowerInvariant() -eq $meta.runtimes[0].sha256) "Wrong SR deployed: $name"
         Assert ((Get-Content (Join-Path $directory 'windoom.exe') -Raw).Trim() -eq 'unchanged executable') 'Executable modified.'
         if ($name -ne 'windoom-ngx-dlss3.5') { Assert (-not (Test-Path (Join-Path $directory 'nvngx_dlssd.dll'))) 'RR leaked into SR-only mode.' }
-        Assert (-not (Test-Path (Join-Path $directory 'nvngx_dlssg.dll'))) 'Frame generation DLL deployed.'
+        if ($name -eq 'windoom-ngx-dlss5') {
+            Assert ((Get-Content (Join-Path $directory 'nvngx_dlssg.dll') -Raw).Trim() -eq 'external-frame-generation') 'External frame generation DLL changed.'
+            Assert ((Get-Content (Join-Path $directory 'dxgi.dll') -Raw).Trim() -eq 'external-injector') 'External injector changed.'
+            Assert ((Get-Content (Join-Path $directory 'renodx-dlss5.addon64') -Raw).Trim() -eq 'external-addon') 'External addon changed.'
+        } else { Assert (-not (Test-Path (Join-Path $directory 'nvngx_dlssg.dll'))) 'Frame generation DLL deployed.' }
     }
     foreach ($name in @('windoom-original','windoom-anime4k','windoom-fsr2')) {
         Assert (@(Get-ChildItem (Join-Path $fixture ('build-win/Release/' + $name)) -File).Count -eq 1) 'Other mode modified.'
     }
     $backup = Get-ChildItem (Join-Path $cache 'backups') -Directory | Where-Object { (Get-Content (Join-Path $_.FullName 'backup.json') -Raw | ConvertFrom-Json).entries.Count -gt 1 } | Select-Object -First 1
+    $activeSnapshot = Snapshot
+    $backupCount = @(Get-ChildItem (Join-Path $cache 'backups') -Directory).Count
+    $null = Run-Fetch @('-Offline')
+    Assert ((Snapshot) -eq $activeSnapshot) 'Complete deployment changed on reuse.'
+    Assert (@(Get-ChildItem (Join-Path $cache 'backups') -Directory).Count -eq $backupCount) 'Idempotent deployment created a backup.'
+    # A complete latest SDK/deployment must still detect a stale RR copied in
+    # later, rather than returning early because only the SR hash matches.
+    $cachedStaleRR = Join-Path $fixture 'build-win/Release/windoom-ngx-dlss5/nvngx_dlssd.dll'
+    Set-Content $cachedStaleRR 'late-stale-RR'
+    $null = Run-Fetch @('-Offline')
+    Assert (-not (Test-Path -LiteralPath $cachedStaleRR)) 'Stale RR survived verified installed-SDK reuse.'
+    Assert ((Snapshot) -eq $activeSnapshot) 'Stale RR cleanup changed the active SDK or third-party files.'
     $null = Run-Fetch @('-RestoreBackup', $backup.Name)
     Assert ((Snapshot) -eq $oldSnapshot) 'SDK, libraries and runtimes not restored consistently.'
-    Write-Host 'PASS old-header upgrade, feature-specific x64 Release deployment and consistent restore'
+    Write-Host 'PASS legacy all-folder RR cleanup, feature-specific deployment, third-party preservation and consistent restore'
 
     # A broken cache must never remove the usable legacy installation.
     $cacheHeader = Join-Path $cache ($release.commit + '/include/nvsdk_ngx.h')
@@ -96,12 +118,14 @@ try {
     Write-Host 'PASS failed download leaves old installation intact and discards partial data'
 
     Copy-Item (Join-Path $SeedCache 'include/nvsdk_ngx.h') $cacheHeader -Force
-    $locked = Join-Path $fixture 'build-win/Release/windoom-ngx-dlss4/nvngx_dlss.dll'
-    $handle = [IO.File]::Open($locked, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
-    try { $null = Run-Fetch @('-Offline') $false }
-    finally { $handle.Dispose() }
-    Assert ((Snapshot) -eq $oldSnapshot) 'Locked DLL changed the installation.'
-    Write-Host 'PASS in-use DLL refuses publication without modifying old installation'
+    foreach ($runtimeName in @('nvngx_dlss.dll', 'nvngx_dlssd.dll')) {
+        $locked = Join-Path $fixture ('build-win/Release/windoom-ngx-dlss4/' + $runtimeName)
+        $handle = [IO.File]::Open($locked, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::None)
+        try { $null = Run-Fetch @('-Offline') $false }
+        finally { $handle.Dispose() }
+        Assert ((Snapshot) -eq $oldSnapshot) "Locked $runtimeName changed the installation."
+    }
+    Write-Host 'PASS in-use SR and obsolete RR refuse publication without modifying old installation'
 
     if ($env:OS -ne 'Windows_NT') {
         # A parent-directory permission error occurs after SDK publication, so
