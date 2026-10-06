@@ -23,4 +23,3 @@ int GB_ProjectMotion(const GB_FrameInputs *current, const GB_FrameInputs *previo
     motion[0] = prev[0] - cur[0]; motion[1] = prev[1] - cur[1];
     return 1;
 }
-
