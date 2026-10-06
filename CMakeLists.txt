@@ -76,6 +76,7 @@ set(DOOM_SOURCES
 add_executable(windoom
   ${DOOM_SOURCES}
   win32/gbuffer.c
+  win32/gpu_timing.c
   win32/i_main_win.c
   win32/i_net_win.c
   win32/i_sound_win.c
