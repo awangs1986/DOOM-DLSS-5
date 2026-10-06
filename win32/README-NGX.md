@@ -74,6 +74,12 @@ are preserved. Other present modes are unaffected. This update alone does not en
 
 The entry point verifies complete installations before reuse, stages every
 new file before publication and preflights exclusive access to existing files.
+Only manifest-listed files enter the new SDK stage; extra cache files are left
+alone. Reuse also requires the installed SDK inventory to contain only those
+files, their directories and `ngx-install.json`. An extra installed header or
+library triggers a replacement with a backup of the complete original SDK.
+Managed paths, pinned cache files and SDK/backup trees must not contain junctions
+or symbolic links; those cases abort rather than following external targets.
 A DLL in use aborts the update; quit the game before retrying. Download and
 validation failures leave the original installation intact. A publication error
 rolls back all touched targets. `ngx-install.json` records the SDK release,
