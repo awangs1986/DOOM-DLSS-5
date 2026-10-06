@@ -26,6 +26,7 @@ set(DOOM_SOURCES
   ${DOOM_DIR}/hu_lib.c
   ${DOOM_DIR}/hu_stuff.c
   ${DOOM_DIR}/info.c
+  ${DOOM_DIR}/language.c
   ${DOOM_DIR}/m_argv.c
   ${DOOM_DIR}/m_bbox.c
   ${DOOM_DIR}/m_cheat.c
@@ -185,3 +186,9 @@ if(WINDOOM_FSR2)
   endif()
   target_link_libraries(windoom PRIVATE ffx_fsr2_api ffx_fsr2_dx12)
 endif()
+
+# Resource lookup is relative to the executable, including direct CMake builds.
+add_custom_command(TARGET windoom POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_SOURCE_DIR}/languages" "$<TARGET_FILE_DIR:windoom>/languages"
+)

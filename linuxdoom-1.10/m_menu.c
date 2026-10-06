@@ -35,6 +35,9 @@ rcsid[] = "$Id: m_menu.c,v 1.7 1997/02/03 22:45:10 b1 Exp $";
 
 #include "doomdef.h"
 #include "dstrings.h"
+#ifdef _WIN32
+#include "language.h"
+#endif
 
 #include "d_main.h"
 
@@ -131,7 +134,7 @@ boolean			menuactive;
 extern boolean		sendpause;
 char			savegamestrings[10][SAVESTRINGSIZE];
 
-char	endstring[160];
+char	endstring[256];
 
 
 //
@@ -1097,13 +1100,17 @@ void M_QuitResponse(int ch)
 
 void M_QuitDOOM(int choice)
 {
-  // We pick index 0 which is language sensitive,
-  //  or one at random, between 1 and maximum number.
-  if (language != english )
-    sprintf(endstring,"%s\n\n"DOSY, endmsg[0] );
+#ifdef _WIN32
+  Lang_QuitMessage(endstring, sizeof(endstring));
+#else
+  // Retain original static text behavior for the historical Linux build.
+  if (language != english)
+    snprintf(endstring, sizeof(endstring), "%s\n\n" DOSY, endmsg[0]);
   else
-    sprintf(endstring,"%s\n\n"DOSY, endmsg[ (gametic%(NUM_QUITMESSAGES-2))+1 ]);
-  
+    snprintf(endstring, sizeof(endstring), "%s\n\n" DOSY,
+             endmsg[(gametic % (NUM_QUITMESSAGES - 2)) + 1]);
+#endif
+
   M_StartMessage(endstring,M_QuitResponse,true);
 }
 
@@ -1260,7 +1267,7 @@ int M_StringWidth(char* string)
 	
     for (i = 0;i < strlen(string);i++)
     {
-	c = toupper(string[i]) - HU_FONTSTART;
+	c = toupper((unsigned char)string[i]) - HU_FONTSTART;
 	if (c < 0 || c >= HU_FONTSIZE)
 	    w += 4;
 	else
@@ -1312,7 +1319,7 @@ M_WriteText
 	
     while(1)
     {
-	c = *ch++;
+	c = (unsigned char)*ch++;
 	if (!c)
 	    break;
 	if (c == '\n')
@@ -1757,21 +1764,15 @@ void M_Drawer (void)
 	y = 100 - M_StringHeight(messageString)/2;
 	while(*(messageString+start))
 	{
-	    for (i = 0;i < strlen(messageString+start);i++)
-		if (*(messageString+start+i) == '\n')
-		{
-		    memset(string,0,40);
-		    strncpy(string,messageString+start,i);
-		    start += i+1;
-		    break;
-		}
-				
-	    if (i == strlen(messageString+start))
-	    {
-		strcpy(string,messageString+start);
-		start += i;
-	    }
-				
+            size_t length = 0, copied;
+            while (messageString[start + length] && messageString[start + length] != '\n')
+                ++length;
+            copied = length < sizeof(string) - 1 ? length : sizeof(string) - 1;
+            memcpy(string, messageString + start, copied);
+            string[copied] = 0;
+            start += (int)length;
+            if (messageString[start] == '\n') ++start;
+
 	    x = 160 - M_StringWidth(string)/2;
 	    M_WriteText(x,y,string);
 	    y += SHORT(hu_font[0]->height);

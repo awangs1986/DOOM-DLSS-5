@@ -179,6 +179,9 @@ if not exist "%SRC%" (
 )
 mkdir "%DEST%" 2>nul
 copy /Y "%SRC%" "%DEST%\windoom.exe" >nul
+mkdir "%DEST%\languages" 2>nul
+copy /Y "%~dp0languages\*.ini" "%DEST%\languages\" >nul
+if errorlevel 1 exit /b 1
 if /I "%KIND%"=="ngx35" (
   >"%DEST%\ngx.mode" echo rr
   >"%DEST%\README.txt" echo DLSS 3.5 Ray Reconstruction. Albedo/roughness are synthesized. See win32\README-NGX.md
