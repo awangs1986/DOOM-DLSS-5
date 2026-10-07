@@ -31,12 +31,13 @@ int MapSource_Capture(uint64_t generation, MapMesh *mesh, char *diagnostic, size
  for(i=0;i<numsectors;i++){
   sector_data[i].floor_height=sectors[i].floorheight/65536.0;sector_data[i].ceiling_height=sectors[i].ceilingheight/65536.0;
   sector_data[i].floor_material=sectors[i].floorpic;sector_data[i].ceiling_material=sectors[i].ceilingpic;
+  sector_data[i].lightlevel=sectors[i].lightlevel;
   sector_data[i].floor_sky=sectors[i].floorpic==skyflatnum;sector_data[i].ceiling_sky=sectors[i].ceilingpic==skyflatnum;
  }
  for(i=0;i<numsides;i++){
   side_data[i].sector=(uint32_t)(sides[i].sector-sectors);side_data[i].x_offset=sides[i].textureoffset/65536.0;side_data[i].y_offset=sides[i].rowoffset/65536.0;
   side_data[i].material[MAP_WALL_MID]=sides[i].midtexture;side_data[i].material[MAP_WALL_UPPER]=sides[i].toptexture;side_data[i].material[MAP_WALL_LOWER]=sides[i].bottomtexture;
-  for(j=0;j<3;j++) side_data[i].texture_height[j]=textureheight[side_data[i].material[j]]/65536.0;
+  for(j=0;j<3;j++) side_data[i].texture_height[j]=textureheight[texturetranslation[side_data[i].material[j]]]/65536.0;
  }
  for(i=0;i<numlines;i++){
   line_data[i].vertex[0]=(uint32_t)(lines[i].v1-vertexes);line_data[i].vertex[1]=(uint32_t)(lines[i].v2-vertexes);
@@ -60,4 +61,45 @@ int MapSource_Capture(uint64_t generation, MapMesh *mesh, char *diagnostic, size
  result=MapMesh_Build(&input,mesh,diagnostic,capacity);
 done:
  free(points);free(sector_data);free(side_data);free(line_data);free(seg_data);free(leaf_data);free(node_data);return result;
+}
+
+/* FNV values are comparison tokens within one loaded generation, not security hashes. */
+static void revision_word(uint64_t *hash, uint32_t value)
+{
+ unsigned byte;
+ for(byte=0;byte<4;byte++){*hash^=(value>>(byte*8))&255u;*hash*=UINT64_C(1099511628211);}
+}
+int MapSource_Survey(MapWorldRevision *r)
+{
+ int i,j;
+ if(!r||numsectors<1||numsectors>1000000||numsides<1||numsides>1000000)return 0;
+ memset(r,0,sizeof(*r));r->sectors=numsectors;r->sides=numsides;
+ r->geometry=r->material=r->lighting=UINT64_C(14695981039346656037);
+ for(i=0;i<numsectors;i++){
+  revision_word(&r->geometry,sectors[i].floorheight);revision_word(&r->geometry,sectors[i].ceilingheight);
+  revision_word(&r->geometry,sectors[i].floorpic==skyflatnum);revision_word(&r->geometry,sectors[i].ceilingpic==skyflatnum);
+  revision_word(&r->material,sectors[i].floorpic);revision_word(&r->material,sectors[i].ceilingpic);
+  revision_word(&r->lighting,sectors[i].lightlevel);
+ }
+ for(i=0;i<numsides;i++){
+  int ids[3]={sides[i].midtexture,sides[i].toptexture,sides[i].bottomtexture};
+  revision_word(&r->material,sides[i].textureoffset);revision_word(&r->material,sides[i].rowoffset);
+  for(j=0;j<3;j++){
+   revision_word(&r->material,ids[j]);
+   /* Animation may alter masked span/pegging through resolved texture height. */
+   revision_word(&r->geometry,textureheight[texturetranslation[ids[j]]]);
+  }
+ }
+ return 1;
+}
+void MapSource_UpdateLightLevels(MapMesh *mesh)
+{
+ size_t i;if(!mesh)return;
+ for(i=0;i<mesh->surface_count;i++)if(mesh->surfaces[i].active&&mesh->surfaces[i].sector<(unsigned)numsectors)
+  mesh->surfaces[i].lightlevel=sectors[mesh->surfaces[i].sector].lightlevel;
+}
+int MapSource_GetSectorHeights(unsigned sector,double *floor,double *ceiling)
+{
+ if(sector>=(unsigned)numsectors)return 0;
+ *floor=sectors[sector].floorheight/65536.0;*ceiling=sectors[sector].ceilingheight/65536.0;return 1;
 }
