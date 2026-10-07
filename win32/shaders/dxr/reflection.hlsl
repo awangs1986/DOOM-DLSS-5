@@ -52,6 +52,7 @@ void trace(uint3 thread:SV_DispatchThreadID) {
  if(thread.x>=320||thread.y>=200)return;
  uint i=thread.y*320+thread.x;Sample s=samples[i];
  Result r=(Result)0;r.position=s.position;r.flags=s.flags;r.original=useLighting?baseRGBA[i]:s.original;
+ r.reserved=s.sourceAmbient|((s.kind&255)<<16);
  r.finalColor=r.original;r.descriptor=s.descriptor;r.surface=r.triangleIndex=0xffffffff;
  if((s.flags&1)&&s.descriptor<bounds.descriptorCount&&settings[s.descriptor].reflect&&s.kind<=1) {
   float3 n=normalize(s.normal),incident=normalize(s.position-camera);

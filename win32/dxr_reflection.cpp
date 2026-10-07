@@ -113,9 +113,9 @@ void collect() {
  for(unsigned i=0;i<count;i++) {
   const auto &r=results[i];rays+=(r.flags&2)!=0;hits+=(r.flags&4)!=0;miss+=(r.flags&8)!=0;errors+=(r.flags&16)!=0;exhausted+=(r.flags&32)!=0;
   shadow+=(r.flags&64)!=0;blocked+=(r.flags&128)!=0;changed+=r.original!=final[i];checks+=r.alpha_checks;rejected+=r.rejected;max_steps=std::max(max_steps,std::max(r.steps,r.shadow_steps));
-  if(detail&&(r.flags&2))std::fprintf(state.details,"%u,%d,%llu,%llu,%u,%u,%u,%u,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%.9g,%.9g,%.9g\n",
+  if(detail&&(r.flags&2))std::fprintf(state.details,"%u,%d,%llu,%llu,%u,%u,%u,%u,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%.9g,%.9g,%.9g,%u,%u,%u,%u,%.9g,%.9g,%.9g\n",
    state.frame,state.tic,(unsigned long long)state.generation,(unsigned long long)state.revision,i%320,i/320,r.flags,r.status,
-   r.position[0],r.position[1],r.position[2],r.hit_position[0],r.hit_position[1],r.hit_position[2],r.uv[0],r.uv[1],r.hit_t,r.surface,r.triangle,r.instance,r.geometry,r.source_index,r.ambient_index,r.steps,r.shadow_steps,r.shadow_status,r.original,final[i],r.reflection[0],r.reflection[1],r.reflection[2]);
+   r.position[0],r.position[1],r.position[2],r.hit_position[0],r.hit_position[1],r.hit_position[2],r.uv[0],r.uv[1],r.hit_t,r.surface,r.triangle,r.instance,r.geometry,r.source_index,r.ambient_index,r.steps,r.shadow_steps,r.shadow_status,r.original,final[i],r.reflection[0],r.reflection[1],r.reflection[2],r.descriptor,(r.reserved>>16)&255,r.reserved&255,(r.reserved>>8)&255,r.hit_normal[0],r.hit_normal[1],r.hit_normal[2]);
  }
  if(detail){state.last_detail_tic=state.tic;std::fflush(state.details);}
  if(state.stats){std::fprintf(state.stats,"%u,%d,%llu,%llu,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",state.frame,state.tic,(unsigned long long)state.generation,(unsigned long long)state.revision,rays,hits,miss,errors,exhausted,shadow,blocked,changed,checks,rejected,max_steps,state.budget,state.history_reset?1:0,state.temporal_reset,state.ngx_evaluated,state.fsr_evaluated,state.frame_reset_reasons,state.frame_history_valid);std::fflush(state.stats);}
@@ -165,7 +165,7 @@ extern "C" void DxrReflection_Init(void *device,unsigned width,unsigned height) 
  state.stats=observation("-rt-reflection-stats");state.details=observation("-rt-reflection-pixels");
  int tic=M_CheckParm("-rt-reflection-pixel-tic");if(tic&&tic+1<myargc){char *end=nullptr;long t=std::strtol(myargv[tic+1],&end,10);if(*myargv[tic+1]&&!*end&&t>=0&&t<10000000)state.detail_tic=(int)t;}
  if(state.stats)std::fprintf(state.stats,"frame,game_tic,generation,material_revision,rays,hits,miss,errors,exhausted,hit_shadow_rays,hit_shadow_blocked,changed_pixels,alpha_checks,alpha_rejected,max_steps,budget,reflection_reset_requested,temporal_reset_arg,ngx_evaluated,fsr_evaluated,frame_input_reset_reasons,frame_input_history_valid\n");
- if(state.details)std::fprintf(state.details,"frame,game_tic,generation,material_revision,x,y,flags,status,world_x,world_height,world_y,hit_x,hit_height,hit_y,u,v,hit_distance,surface,triangle,instance,geometry,source_index,ambient_index,steps,shadow_steps,shadow_status,original_rgba,final_rgba,reflection_r,reflection_g,reflection_b\n");
+ if(state.details)std::fprintf(state.details,"frame,game_tic,generation,material_revision,x,y,flags,status,world_x,world_height,world_y,hit_x,hit_height,hit_y,u,v,hit_distance,surface,triangle,instance,geometry,source_index,ambient_index,steps,shadow_steps,shadow_status,original_rgba,final_rgba,reflection_r,reflection_g,reflection_b,receiver_descriptor,receiver_kind,receiver_source_index,receiver_ambient_index,hit_normal_x,hit_normal_height,hit_normal_y\n");
  if(state.configured)std::fprintf(stderr,"RT reflection: requested=%d material rules=%u one bounce, <=64000 reflected rays + <=64000 hit-shadow rays, steps<=%u; stateless spatial low-roughness approximation; recurring SR reset\n",state.requested,state.config.material_count,state.budget);
 }
 extern "C" void DxrReflection_RequestEnabled(int enabled) {
