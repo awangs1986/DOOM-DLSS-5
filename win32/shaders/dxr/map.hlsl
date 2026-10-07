@@ -25,7 +25,7 @@ Hit trace(float3 direction) {
   hit.instance=query.CommittedInstanceID();
   uint triangleIndex=sceneTriangleIndex(hit.instance,hit.geometry,hit.primitive,geometryRanges,rangeCount);
   if(triangleIndex==0xffffffff){hit.valid=0;return hit;}
-  ScenePrimitive p=primitives[triangleIndex];hit.surface=p.surface;hit.normal=p.legacyNormal;
+  ScenePrimitive p=primitives[triangleIndex];hit.surface=p.surface;hit.normal=p.inwardNormal;
  }
  return hit;
 }

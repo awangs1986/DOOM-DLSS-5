@@ -439,6 +439,9 @@ R_DrawVisSprite
     patch_t*		patch;
 	
 	
+#ifdef _WIN32
+    GB_SetMaterialContext(GB_KIND_SPRITE,(unsigned)vis->patch);
+#endif
     patch = W_CacheLumpNum (vis->patch+firstspritelump, PU_CACHE);
 
     dc_colormap = vis->colormap;

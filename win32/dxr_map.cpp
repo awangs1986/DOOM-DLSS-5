@@ -34,7 +34,7 @@ struct State {
  ComPtr<ID3D12RootSignature> root;ComPtr<ID3D12PipelineState> pipeline;
  D3D12_RESOURCE_STATES output_state=D3D12_RESOURCE_STATE_UNORDERED_ACCESS,hit_state=D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
  MapMesh mesh={};DxrMapSceneView view={};MapGeometryRange range={};
- uint64_t generation=0;char map_name[9]={};bool loaded=false,supported=false,enabled=false,disabled=false,ready=false,failed_generation=false,pending=false;
+ uint64_t generation=0;char map_name[9]={};bool consumer_requested=false,loaded=false,supported=false,enabled=false,disabled=false,ready=false,failed_generation=false,pending=false;
  int mode=0,hit_tic=-1,last_hit_tic=-1,frame_tic=0;unsigned width=0,height=0,row_pitch=0,frame_id=0;
  FILE *stats=nullptr,*details=nullptr;
  std::vector<float> expected;std::vector<unsigned char> reference_normal;std::vector<uint32_t> frame_flags;
@@ -140,7 +140,7 @@ bool build_scene() {
  desc.Inputs=top;desc.DestAccelerationStructureData=state.tlas->GetGPUVirtualAddress();list->BuildRaytracingAccelerationStructure(&desc,0,nullptr);uav_barrier(list.Get(),state.tlas.Get());
  if(failed(list->Close(),"map build close"))return false;ID3D12CommandList* lists[]={list.Get()};state.queue->ExecuteCommandLists(1,lists);if(!wait_queue())return false;
  state.view={&state.mesh,state.tlas.Get(),state.tlas->GetGPUVirtualAddress(),state.generation,&state.range,1,state.metadata.Get(),state.geometry_ranges.Get(),state.vertices.Get(),state.indices.Get()};
- std::fprintf(stderr,"DXR map: generation=%llu map=%s surfaces=%zu triangles=%zu leaves=%zu empty=%u closed_area=%.3f BLAS=%llu TLAS=%llu build fence completed; legacy Y-up normals\n",static_cast<unsigned long long>(state.generation),state.map_name,active,mesh.triangle_count,mesh.leaf_count,mesh.empty_leaves,area,static_cast<unsigned long long>(bs.ResultDataMaxSizeInBytes),static_cast<unsigned long long>(ts.ResultDataMaxSizeInBytes));
+ std::fprintf(stderr,"DXR map: generation=%llu map=%s surfaces=%zu triangles=%zu leaves=%zu empty=%u closed_area=%.3f BLAS=%llu TLAS=%llu build fence completed; inward Y-up physical normals\n",static_cast<unsigned long long>(state.generation),state.map_name,active,mesh.triangle_count,mesh.leaf_count,mesh.empty_leaves,area,static_cast<unsigned long long>(bs.ResultDataMaxSizeInBytes),static_cast<unsigned long long>(ts.ResultDataMaxSizeInBytes));
  return true;
 }
 FILE* observe_file(const char* flag) {
@@ -197,11 +197,11 @@ extern "C" void DxrMap_LevelLoaded(const char* name) {
  if(state.mode)std::fprintf(stderr,"DXR map: new generation=%llu map=%s marked dirty; snapshot deferred until restored-world scene frame\n",static_cast<unsigned long long>(state.generation),state.map_name);
 }
 extern "C" void DxrMap_Prepare(void) {
- collect();if(!state.enabled||!state.loaded||state.failed_generation||!GB_GetFrameInputs()->scene_valid)return;
- if(!state.ready) {
+ collect();if((!state.enabled&&!state.consumer_requested)||!state.supported||state.disabled||!state.loaded||state.failed_generation||!GB_GetFrameInputs()->scene_valid)return;
+ {
   try {
-   if(!state.pipeline && !load_pipeline())throw std::runtime_error("map pipeline unavailable");
-   if(!state.rays||!state.flags||!state.original||!state.output||!state.hits||!state.readback) {
+   if(state.enabled && !state.pipeline && !load_pipeline())throw std::runtime_error("map pipeline unavailable");
+   if(state.enabled && (!state.rays||!state.flags||!state.original||!state.output||!state.hits||!state.readback)) {
     state.output_state=state.hit_state=D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
     /* Retry the complete diagnostic allocation after a partial failure. */
     if(!state.pipeline)throw std::runtime_error("map pipeline unavailable");
@@ -213,12 +213,12 @@ extern "C" void DxrMap_Prepare(void) {
     state.readback=buffer(64001*sizeof(Hit),D3D12_HEAP_TYPE_READBACK,D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_FLAG_NONE);
     if(!state.rays||!state.flags||!state.original||!state.output||!state.hits||!state.readback)throw std::runtime_error("map diagnostic allocation failed");
    }
-   if(!build_scene())throw std::runtime_error("map scene unavailable");state.ready=true;
+   if(!state.ready) { if(!build_scene())throw std::runtime_error("map scene unavailable");state.ready=true; }
   }catch(const std::exception& error){std::fprintf(stderr,"DXR map: generation=%llu initialization failed: %s; normal present retained\n",static_cast<unsigned long long>(state.generation),error.what());release_scene();state.failed_generation=true;return;}
  }
 }
 extern "C" int DxrMap_Render(void* commands,void* backbuffer) {
- const auto frame=GB_GetFrameInputs();if(!state.enabled||!state.ready||!frame->scene_valid)return 0;
+ const auto frame=GB_GetFrameInputs();if(!state.enabled||!state.ready||!state.pipeline||!state.output||!frame->scene_valid)return 0;
  try {
  ComPtr<ID3D12GraphicsCommandList4> list;auto base=static_cast<ID3D12GraphicsCommandList*>(commands);
  if(failed(base->QueryInterface(IID_PPV_ARGS(&list)),"map frame list4")||failed(state.device->GetDeviceRemovedReason(),"map frame device")){state.enabled=false;return 0;}
@@ -258,3 +258,9 @@ extern "C" const MapSurface* DxrMap_GetSurface(unsigned instance,unsigned geomet
  for(unsigned i=0;i<state.view.geometry_count;i++){auto range=state.view.geometry_ranges[i];if(instance==range.instance_id&&geometry==range.geometry_index&&primitive<range.triangle_count)return &state.mesh.surfaces[state.mesh.triangle_surfaces[range.triangle_base+primitive]];}
  return nullptr;
 }
+
+extern "C" void DxrMap_RequestScene(int requested) {
+ state.consumer_requested=requested!=0;
+ if(requested)state.failed_generation=false;
+}
+extern "C" int DxrMap_Available(void) { return state.supported && !state.disabled; }

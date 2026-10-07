@@ -53,9 +53,9 @@ static void GB_WallColumn(int x, fixed_t scale)
 	z = (float)projection / (float)scale;
     an = rw_normalangle >> ANGLETOFINESHIFT;
     GB_SetColumn(x, z,
-		 (float)finecosine[an] / 65536.0f,
+		 -(float)finecosine[an] / 65536.0f,
 		 0.0f,
-		 (float)finesine[an] / 65536.0f,
+		 -(float)finesine[an] / 65536.0f,
 		 GB_KIND_WALL);
 }
 #endif
@@ -201,6 +201,7 @@ R_RenderMaskedSegRange
 	    dc_iscale = 0xffffffffu / (unsigned)spryscale;
 #ifdef _WIN32
 	    GB_WallColumn(dc_x, spryscale);
+            GB_SetMaterialContext(GB_KIND_SPRITE,(unsigned)curline->sidedef->midtexture);
 #endif
 	    
 	    // draw the texture
@@ -314,7 +315,10 @@ void R_RenderSegLoop (void)
 	    dc_yl = yl;
 	    dc_yh = yh;
 	    dc_texturemid = rw_midtexturemid;
-	    dc_source = R_GetColumn(midtexture,texturecolumn);
+	    #ifdef _WIN32
+            GB_SetMaterialContext(GB_KIND_WALL, (unsigned)sidedef->midtexture);
+#endif
+            dc_source = R_GetColumn(midtexture,texturecolumn);
 	    colfunc ();
 	    ceilingclip[rw_x] = viewheight;
 	    floorclip[rw_x] = -1;
@@ -336,7 +340,10 @@ void R_RenderSegLoop (void)
 		    dc_yl = yl;
 		    dc_yh = mid;
 		    dc_texturemid = rw_toptexturemid;
-		    dc_source = R_GetColumn(toptexture,texturecolumn);
+		    #ifdef _WIN32
+            GB_SetMaterialContext(GB_KIND_WALL, (unsigned)sidedef->toptexture);
+#endif
+            dc_source = R_GetColumn(toptexture,texturecolumn);
 		    colfunc ();
 		    ceilingclip[rw_x] = mid;
 		}
@@ -365,7 +372,10 @@ void R_RenderSegLoop (void)
 		    dc_yl = mid;
 		    dc_yh = yh;
 		    dc_texturemid = rw_bottomtexturemid;
-		    dc_source = R_GetColumn(bottomtexture,
+		    #ifdef _WIN32
+            GB_SetMaterialContext(GB_KIND_WALL, (unsigned)sidedef->bottomtexture);
+#endif
+            dc_source = R_GetColumn(bottomtexture,
 					    texturecolumn);
 		    colfunc ();
 		    floorclip[rw_x] = mid;

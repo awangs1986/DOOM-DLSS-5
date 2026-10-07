@@ -23,7 +23,7 @@ F5 开关地图诊断。`-nort`、软件适配器、缺失着色器、场景构�
 - 校验索引、子节点、循环、共享节点、不可达叶、扇区一致性、非有限数、闭合性、绕序、资源大小和深度限制。GPU float 转换后退化的三角形会导致事务性失败。
 - sky 平面、两侧均 sky 的上墙、双面 masked 中墙不进入实体 AS。当前仅复制首次场景帧的高度；移动门、升降地板、masked alpha 与动态同步由后续票处理。
 
-地图 `(x,y,height)` 映射为 GPU `(x,height,y)`。地板法线 +Y，天花板 −Y。墙元数据同时保存两个固定约定：`legacy_normal` 是软件 G-buffer 当前的有向 seg 左侧法线，`inward_normal` 指向所属 front sector 的右侧。诊断匹配使用前者，后续灯光可以使用后者；均不按相机方向翻转。GPU 三角形绕序对应 legacy 法线；射线不剔除背面。
+地图 `(x,y,height)` 映射为 GPU `(x,height,y)`。地板法线 +Y，天花板 −Y。墙元数据同时保存两个固定约定：`legacy_normal` 保留历史有向 seg 左侧法线，`inward_normal` 指向所属 front sector 的右侧。#12 将软件 G-buffer 和地图法线诊断统一为后者，供物理照明使用；均不按相机方向翻转。GPU 三角形绕序仍对应 legacy 法线；射线不剔除背面。以下 #11 的 2026-10-06 数据记录原提交的历史约定，#12 的复核见 [点光源文档](dxr-lighting.md)。
 
 ## 表面与材质接口
 
@@ -40,7 +40,7 @@ F5 开关地图诊断。`-nort`、软件适配器、缺失着色器、场景构�
 
 当前一个实例 / 一个 BLAS / 一个 geometry。共享 `scene-hit.hlsli` 及 CPU `DxrMap_GetSurface` 通过 range table 将 `(InstanceID, GeometryIndex, PrimitiveIndex)` 映射为全局三角形，再读稳定 surface id；primitive index 不被当作全局 surface id。
 
-`DxrMap_GetScene` 提供当前 scene 的借用视图：CPU mesh、TLAS、GPU primitive metadata、geometry ranges、vertex/index resources 与 generation。借用者不释放资源，必须在同一渲染线程、已等待渲染队列后访问，并在 unload / shutdown 前结束使用；任何指针和 GPU 地址均不得跨 generation 保存。新光追消费者需显式请求场景构建，当前构建触发条件为地图诊断启用。
+`DxrMap_GetScene` 提供当前 scene 的借用视图：CPU mesh、TLAS、GPU primitive metadata、geometry ranges、vertex/index resources 与 generation。借用者不释放资源，必须在同一渲染线程、已等待渲染队列后访问，并在 unload / shutdown 前结束使用；任何指针和 GPU 地址均不得跨 generation 保存。#12 增加 `DxrMap_RequestScene` 普通消费者请求；地图诊断或普通消费者请求均可触发构建。仅普通消费者请求时不创建诊断 pipeline/buffers，不依赖 `dxr_map.cso`。
 
 ## 帧契约与合成
 
