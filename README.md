@@ -77,7 +77,11 @@ Use `-rt-diagnostic` to show hardware ray hits against a minimal triangle,
 `F5` to return to gameplay, `-adapter <DXGI index>` to select the actual GPU,
 and `-nort` to disable RT. DXR and NGX capabilities are checked independently.
 See [DXR diagnostic](docs/dxr-diagnostic.md) for DXC requirements and fallback.
-Real map shadows and reflections are separate work.
+For actual map lighting, open **Options → Graphics** and toggle RT. The staged
+`rt-light.cfg` and `rt-materials.cfg` configure hard shadows and selected-material
+single reflections; RT remains off until requested. SR is controlled separately.
+See [graphics menu](docs/graphics-menu.md), [map lighting](docs/dxr-lighting.md),
+[reflections](docs/dxr-reflection.md), and [packaged usage](docs/packaged-usage.md).
 
 ## DLSS 5 Swapper
 

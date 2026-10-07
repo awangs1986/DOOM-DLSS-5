@@ -52,7 +52,24 @@ python3 tests/test_language_startup.py /tmp/windoom-language-startup
 
 拾取键的后缀为：`armor`、`mega_armor`、`health_bonus`、`armor_bonus`、`supercharge`、`mega_sphere`、`blue_card`、`yellow_card`、`red_card`、`blue_skull`、`yellow_skull`、`red_skull`、`stimpack`、`medikit_needed`、`medikit`、`invulnerability`、`berserk`、`invisibility`、`radiation_suit`、`map`、`light_visor`、`clip`、`clip_box`、`rocket`、`rocket_box`、`cell`、`cell_box`、`shells`、`shell_box`、`backpack`、`bfg`、`chaingun`、`chainsaw`、`launcher`、`plasma`、`shotgun`、`super_shotgun`。
 
-未迁移文字包括其他菜单图片/标题、关卡和剧情、地图名称、聊天宏、门锁提示、普通保存完成提示、网络/新游戏/难度错误提示和存档槽名称输入。原英文宏仍可供静态初始化与历史 Linux 构建使用。首版不扩展聊天或存档名称的输入字符范围。
+图形菜单新增稳定键，英文内建目录和 `es-ascii` 示例包均提供文字；NR 身份仍与 SR、DLAA 分开。`graphics.reason.none` 是空内部哨兵，不写入语言包（包格式拒绝空值）。
+
+| 文字 | 稳定键 |
+| --- | --- |
+| Options 入口、图形标题 | `graphics.title` |
+| 三项标签、实际状态标题 | `graphics.rt`、`graphics.sr`、`graphics.nr`、`graphics.actual` |
+| 实际状态 | `graphics.state.off`、`pending`、`active`、`unavailable`、`fallback`、`unverified`、`unknown`、`paused`（后七项同 `graphics.state.` 前缀） |
+| 正常关闭、等待、场景暂停 | `graphics.reason.off`、`pending`、`non_scene`（同 `graphics.reason.` 前缀） |
+| RT 能力、配置、局部失败 | `graphics.reason.no_dxr`、`no_effects`、`rt_partial`、`rt_failed`、`effects_disabled` |
+| NGX 未编译、运行库、初始化及执行 | `graphics.reason.not_compiled`、`runtime`、`init`、`capability`、`create`、`evaluate`、`hires`、`carrier`、`legacy_rr` |
+| 可选 NR 后端和确认限制 | `graphics.reason.backend_missing`、`restart`、`unsupported`、`confirmation_pending`、`confirmation_failed`、`execution_unverified`、`no_input` |
+| 偏好诊断 | `graphics.reason.save_failed`、`prefs_invalid` |
+
+上表省略前缀的后缀均与本行首键使用相同前缀；键本身不包含显示文字。请求的开关值复用 `option.state.on/off`。图形入口、标签、值、实际状态和原因均先做字体转换，再按真实 glyph 像素宽度换行或截断。原因最多四行；有保存错误时保留两行原因和两行保存诊断，正文限制在状态栏上方。缺键逐字段回退英文，坏包仍整体回退。详细操作和配置优先级见 [图形菜单](graphics-menu.md)。
+
+2026-10-07 用户豁免当前 DLSS5／NR 功能验证。翻译键和原模式保留，NR 的 consumer、checkbox 或 GPU 执行不因文字存在而被声明通过。当前补充中文显示任务由 [中文显示扩展](chinese-display-task.md) 单独记录；初始 ASCII 包及初始字体限制的证据不能代替实际 CJK 字形验收。
+
+未迁移文字包括其余菜单图片/标题、关卡和剧情、地图名称、聊天宏、门锁提示、普通保存完成提示、网络/新游戏/难度错误提示和存档槽名称输入。原英文宏仍可供静态初始化与历史 Linux 构建使用。首版不扩展聊天或存档名称的输入字符范围。
 
 ## 受限模板
 
