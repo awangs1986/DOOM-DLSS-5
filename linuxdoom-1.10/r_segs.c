@@ -41,6 +41,7 @@ rcsid[] = "$Id: r_segs.c,v 1.3 1997/01/29 20:10:19 b1 Exp $";
 
 #ifdef _WIN32
 #include "gbuffer.h"
+#include <math.h>
 
 static void GB_WallColumn(int x, fixed_t scale)
 {
@@ -57,6 +58,15 @@ static void GB_WallColumn(int x, fixed_t scale)
 		 0.0f,
 		 -(float)finesine[an] / 65536.0f,
 		 GB_KIND_WALL);
+    /* The lookup-table normal above preserves the existing packed diagnostic
+     * and lighting path. Reflection needs the real directed seg plane. */
+    if (curline && curline->v1 && curline->v2) {
+        double dx = (double)curline->v2->x - (double)curline->v1->x;
+        double dy = (double)curline->v2->y - (double)curline->v1->y;
+        double length = sqrt(dx * dx + dy * dy);
+        if (length > 0.0)
+            GB_SetColumnGeometricNormal((float)(dy / length),0.0f,(float)(-dx / length));
+    }
 }
 #endif
 

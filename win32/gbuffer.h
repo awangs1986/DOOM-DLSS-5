@@ -132,6 +132,11 @@ const unsigned char *GB_OverlayMask(void);
 const float         *GB_Depth(void);
 const float         *GB_TemporalDepth(void);
 const unsigned char *GB_NormalRGBA(void);
+/* Float3 physical inward normals from the current scene capture. Wall normals
+ * come from the current directed seg; planes use their exact axis normal.
+ * Valid only where material/scene capture is valid; overlays never replace it. */
+const float *GB_GeometricNormalXYZ(void);
+void GB_SetColumnGeometricNormal(float nx,float ny,float nz);
 const float         *GB_VelocityRG(void);
 
 void GB_ComposePresent(unsigned char *dst_bgra, int dst_w, int dst_h);

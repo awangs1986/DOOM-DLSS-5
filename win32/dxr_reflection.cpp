@@ -217,11 +217,11 @@ extern "C" int DxrReflection_Evaluate(void *commands,void *scene_texture) {
  const auto *scene=DxrMap_GetScene();const auto *materials=RtMaterials_GetView();if(!scene||!materials)return 0;
  try {
   std::vector<Sample> samples(count);std::vector<float> base(count*4);std::vector<unsigned> original(count);unsigned palette[256];
-  auto color=GB_ColorRGBA();auto normal=GB_NormalRGBA();auto material=GB_MaterialSamples();auto kind=GB_SurfaceKind();auto raw=GB_RawPaletteRGB();auto gamma=GB_GammaLUT();
+  auto color=GB_ColorRGBA();auto normal=GB_GeometricNormalXYZ();auto material=GB_MaterialSamples();auto kind=GB_SurfaceKind();auto raw=GB_RawPaletteRGB();auto gamma=GB_GammaLUT();
   for(unsigned i=0;i<count;i++) {
    auto &s=samples[i];s.descriptor=UINT32_MAX;s.material=material[i].material_id;s.kind=material[i].kind;s.source_ambient=material[i].source_index|((unsigned)material[i].ambient_index<<8);
    s.original=color[i*4]|((unsigned)color[i*4+1]<<8)|((unsigned)color[i*4+2]<<16)|0xff000000;original[i]=s.original;
-   for(unsigned c=0;c<3;c++){s.normal[c]=normal[i*4+c]==128?0:normal[i*4+c]/127.5f-1;base[i*4+c]=linear(raw[material[i].ambient_index*3+c]);}
+   for(unsigned c=0;c<3;c++){s.normal[c]=normal[i*3+c];base[i*4+c]=linear(raw[material[i].ambient_index*3+c]);}
    if(material[i].valid&&kind[i]<=GB_KIND_CEILING&&GB_SampleWorldPosition(i%320,i/320,s.position)) {
     s.flags=1;base[i*4+3]=1;unsigned flat=s.kind==GB_KIND_FLOOR||s.kind==GB_KIND_CEILING;
     // Software material context records the original sidedef/flat ID. The
