@@ -131,7 +131,7 @@ void collect() {
         const auto &r=results[i];eligible+=(r.flags&1)!=0;rays+=(r.flags&2)!=0;
         blocked+=(r.flags&4)!=0;added+=(r.flags&8)!=0;
         contribution+=r.final_color!=r.original;errors+=r.trace_status==2;exhausted+=r.trace_status==3;checks+=r.alpha_checks;rejected+=r.alpha_rejected;
-        if(detail&&(r.flags&1))std::fprintf(state.details,"%u,%d,%llu,%u,%u,%.7g,%.7g,%.7g,%u,%u,%u,%u,%.7g,%.7g,%u,%u,%u,%u,%u,%u,%u,%u,%u,%.7g,%.7g,%u\n",
+        if(detail&&(r.flags&1))std::fprintf(state.details,"%u,%d,%llu,%u,%u,%.7g,%.7g,%.7g,%u,%u,%u,%u,%.7g,%.7g,%u,%u,%u,%u,%u,%u,%u,%u,%u,%.9g,%.9g,%u\n",
           state.frame,state.tic,(unsigned long long)state.generation,i%320,i/320,r.position[0],r.position[1],r.position[2],r.kind,r.material,r.source_ambient&255,(r.source_ambient>>8)&255,r.distance,r.cosine,r.visible,r.flags,r.original,r.final_color,r.trace_status,r.steps,r.alpha_checks,r.alpha_rejected,r.candidate_surface,r.candidate_uv[0],r.candidate_uv[1],r.candidate_alpha);
     }
     if(detail){state.last_detail_tic=state.tic;std::fflush(state.details);}
