@@ -49,6 +49,16 @@ NGX 编译 SDK 为 `v310.9.1` / `374959484e79a640feaba44c93ac8cfb0a03f5b5`，SR 
 
 所有 11 个截图的物理 client 均为 1280×800，window awareness 2、DPI 192，完整窗口位于 2560×1504 workarea 内。菜单／保存错误文字没有再污染 HUD；关闭菜单后健康、弹药及状态栏标签完整。与 penultimate engine PNG 的 HUD 对比允许异步 face 动画差异，face 之外仅有 112 个固定 bottom-corner 像素差异（Windows 圆角，y786..799）；未宣称整个异步截图逐像素相等。多显示器 DPI 转换和较小工作区缩放路径尚未实测。
 
+### 初始图与稳定基准的补充核对
+
+以上 client／同名 engine 的比较不等于不同时间的 engine HUD 比较。根代理另发现相对于 `00-world`，layout 的 face 外 HUD 有 1360 个输出像素差异，preference-warning 有 15184 个；这些差异不是零，也不是健康／弹药数值变化。
+
+初始 layout 图为 frame 39、warning 图为 frame 34，两者均 game tic 1、`inputs.scene=0`、history 0；两条路线到 frame 43／tic 2 才进入正常 scene。`D_Display` 在 whole-screen melt 前调用 `GB_InvalidateScene`，wipe loop 反复 `I_FinishUpdate` 且不推进游戏 tic；`wipe_doMelt` 按两像素列展开 `wipe_scr_end`，未完成的列仍显示旧屏黑色。layout 另有 44 个 logical／704 个输出像素位于左 AMMO 的 x0..13、y191..199，warning 另有 908 个 logical／14528 个输出像素位于 x0..43、y168..199；这些初始像素全部为 gamma0 黑色 `(1,1,1)`，后续展开为正常灰背景／标签。枪尚未抬起的初始 wipe 截图不能作为完整稳定世界的 HUD 基准。
+
+两条路线还有相同的 41 个 logical／656 个输出像素，位于武器栏灰背景。用该 IWAD 的 `STBAR`、`STARMS`、`STGNUM`／`STYSNUM2` 和项目 gamma0，按原 `ST_doRefresh`／`STlib_updateMultIcon` 顺序重建首次与重复刷新，这 41 个像素的初始／后续颜色对全部精确匹配：首次 `oldinum=-1` 直接叠加图标；重复刷新先从 BG 的 STBAR 清除图标矩形，再叠加带透明孔的图标。这是原有 widget 透明背景刷新差异，数字和武器 ownership 不变，不是菜单文字残留。不能把它归入 face 动画或融屏黑区。
+
+以真正的 post-close engine 图为稳定基准（layout frame 129／tic 88、warning frame 148／tic 107），layout 之后及此前稳定菜单共 6 图、warning 共 3 图，在 HUD y672..799 排除 face x568..711 后差异均为 **0**。根代理独立结果为 `root-menu-layout-v5-stable-baseline-review.json`；逐像素、CSV 和 IWAD 重建材料为 `menu-layout-v5-stable-owner-analysis.json` 与 `analyze-menu-layout-stable-v5.py`。本轮未改核心源码，也没有用更换基准掩盖初始非稳态画面；#17 首次稳定世界截图需等待正常 scene、启动 wipe 结束及枪抬起后再取证。
+
 ## GPU 阶段与显存
 
 原始 `gpu.csv` 记录 upload、SR、compose、export-copy、RT、reflection trace/filter、local memory 与 budget。最终菜单矩阵含 8942 行 graphics observer，报告按每组实际请求聚合样本数、最小／中位／最大；缺 NR 后端的样本不能解释为 NR 性能测量。
@@ -62,3 +72,9 @@ NGX 编译 SDK 为 `v310.9.1` / `374959484e79a640feaba44c93ac8cfb0a03f5b5`，SR 
 - `interactive-v5-01` 曾在 SR 初始化期间取得旧截图，不能按截图文件名断言已应用；最终矩阵采用同步新帧的 `interactive-v5-02`。
 - 本轮没有加载／注入／安装 NR consumer，没有 positive 注册、checkbox 回读、卸载／重载或 genuine NR GPU execution，也没有可选 carrier 分配故障的实机正例。`execution_verified` 始终为 0。
 - 用户要求当前可以关机，全部测试退出且原始材料已下载后停止远端工作。5 个一次性 owned scheduled-task 定义的最终删除及全局无进程快照尚未复核；它们没有自动 trigger，保留定义不代表测试仍运行。后续打包和最终集成 GPU 验收待用户再次开机。
+
+## 2026-10-07 恢复工作与验证范围更新
+
+用户随后明确保持测试机开机，并要求一步步完成其余工作；最新范围为“DLSS5不用验证了，其他继续”。上面的关机／停止记录保留为当时收尾历史，后续允许继续 RT、官方 SR、菜单、语言、打包与集成验收。本次补充仅在 Linux 做现有原始数据和截图审查，没有启动新的远端测试。
+
+后续不再进行 DLSS5／NR feature、consumer、checkbox、carrier 或 GPU execution 验证，也不安装／加载／注入消费者。历史原始证据及各自 source identity 保留；NR 实际执行仍标为 **未验证，用户豁免本轮验证**，不是 PASS。根代理将独立 RT／SR 数据验收限定为 12 条非 `dlss5-default` 路线：267 paired actions、534 原生 WM 事件、93 captures、46 次请求转换及 8 条 matched-tic fault 路线；已有独立报告 `root-menu-final-rt-sr-data-review.json`，未新增 NR 证明。
