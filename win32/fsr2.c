@@ -140,6 +140,7 @@ int Fsr2_Init(void *device)
 
     g_inited = 1;
     fprintf(stderr, "FSR2: ready 320x200 -> 1280x800 (Halton jitter)\n");
+    fprintf(stderr, "FSR2 input depth: R32_FLOAT conventional device-Z near=0 far=1 view_planes=%.0f/%.0f depth_inverted=0 depth_infinite=0\n", GB_TEMPORAL_NEAR, GB_TEMPORAL_FAR);
     return 1;
 }
 
@@ -251,8 +252,8 @@ int Fsr2_Evaluate(void *cmdlist, void *color, void *depth, void *velocity,
     d.frameTimeDelta = GB_GetFrameInputs()->frame_delta_ms;
     d.preExposure = 1.0f;
     d.reset = reset ? true : false;
-    d.cameraNear = 1.0f;
-    d.cameraFar = 8192.0f;
+    d.cameraNear = GB_TEMPORAL_NEAR;
+    d.cameraFar = GB_TEMPORAL_FAR;
     half_h = GB_GetFrameInputs()->viewport_height * 0.5f;
     proj = GB_GetFrameInputs()->base.projection;
     if (proj < 1.0f)

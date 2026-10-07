@@ -32,6 +32,33 @@ per presented frame, through the existing `I_FinishUpdate` entry point.
   from1. A GPU tracing module should normalize the actual supplied ray if needed
   and convert its result consistently rather than assuming those are identical.
 
+## Temporal device depth
+
+`GB_Depth()` remains raw software view-axis depth in map units for reconstruction
+and DXR. `GB_TemporalDepth()` is a separate R32_FLOAT input for NGX SR/DLAA
+and FSR2. With near `GB_TEMPORAL_NEAR=1` and far `GB_TEMPORAL_FAR=8192`, it uses
+the conventional perspective device-depth mapping
+`far/(far-near) - far*near/((far-near)*viewZ)`: near maps to0 and far to1.
+Positive depths nearer than near clamp to0; depths at/beyond far clamp to1.
+Invalid/nonfinite/nonpositive depth, sky, padding and non-scene frames use far1.
+This conversion never replaces raw depth, sampled rays or world-position data.
+
+The pure `GB_DeviceDepthFromViewDepth` helper exposes that boundary contract.
+NGX leaves DepthInverted disabled. FSR2 leaves depth
+inverted/infinite flags disabled and passes matching near/far values. DLAA's
+high-resolution depth is nearest replication of the same converted input;
+invalid pixels retain far1 and zero motion. Trace records both raw center
+`depth` and `device_depth`, normalized-buffer min/max/invalid counts, and any
+invalid-pixel far1 mismatch. A successful evaluate alone does not prove this
+input convention; the public analytic helper and actual uploaded-array trace
+provide independent endpoint/range evidence.
+
+The existing synthetic-material RR path retains its explicitly linear-depth
+declaration and receives a separate raw-depth resource. It never consumes the
+device-depth SR texture as linear depth. RR failure falls back to SR using the
+converted device-depth resource and a reset. This preserves the legacy RR
+contract without claiming complete RR material/projection integration.
+
 ## Motion and jitter
 
 `GB_ProjectMotion` projects a world point into both **base**, unjittered cameras

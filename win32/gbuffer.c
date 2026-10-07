@@ -24,6 +24,7 @@ static int gb_scene_captured;
 static int gb_overlay_drawing;
 static int gb_last_scene;
 static float         gb_depth[GB_PIX];
+static float         gb_temporal_depth[GB_PIX];
 static unsigned char gb_normal[GB_PIX * 4];
 static float         gb_velocity[GB_PIX * 2];
 static float         gb_obj_du[GB_PIX];
@@ -54,8 +55,10 @@ static void gb_clear_aux(void)
     memset(gb_velocity, 0, sizeof(gb_velocity));
     memset(gb_obj_du, 0, sizeof(gb_obj_du));
     memset(gb_obj_dv, 0, sizeof(gb_obj_dv));
-    for (i = 0; i < GB_PIX; i++)
+    for (i = 0; i < GB_PIX; i++) {
 	gb_normal[i * 4 + 2] = 128;
+        gb_temporal_depth[i] = 1.0f;
+    }
 }
 
 void GB_Init(void)
@@ -387,6 +390,9 @@ void GB_EndFrame(void)
     int x, y;
     gb_frame.frame_id++;
     gb_frame.scene_valid = gb_scene_captured;
+    for (x = 0; x < GB_PIX; x++)
+        gb_temporal_depth[x] = GB_DeviceDepthFromViewDepth(gb_depth[x],
+                              gb_scene_captured && gb_scene_mask[x]);
     if (!gb_scene_captured) gb_have_prev = 0;
     if (gb_have_prev) {
         float dx = gb_frame.base.position[0] - gb_previous.base.position[0];
@@ -478,6 +484,11 @@ const unsigned char *GB_OverlayMask(void) { return gb_overlay_mask; }
 const float *GB_Depth(void)
 {
     return gb_depth;
+}
+
+const float *GB_TemporalDepth(void)
+{
+    return gb_temporal_depth;
 }
 
 const unsigned char *GB_NormalRGBA(void)
