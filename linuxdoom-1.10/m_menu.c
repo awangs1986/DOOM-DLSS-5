@@ -382,7 +382,12 @@ menu_t  OptionsDef =
     &MainDef,
     OptionsMenu,
     M_DrawOptions,
+#ifdef _WIN32
+    // The ninth row and its 19-pixel skull must end before the status bar.
+    60,25,
+#else
     60,37,
+#endif
     0
 };
 
@@ -394,9 +399,16 @@ static void M_GraphicsToggle(int choice){(void)choice;Graphics_SetRequested(item
 /* Convert UTF-8 first, then use the same glyph widths as M_WriteText. Each
    row is bounded in pixels and y; a wide first row cannot eat later rows. */
 static void M_GraphicsText(int x,int y,const char *text,int width,int lines){
- char safe[LANG_MAX_VALUE+1],wrapped[LANG_MAX_VALUE+1];size_t used=0,i=0;int pixels=0,row=1;
+ char safe[LANG_MAX_VALUE+1],wrapped[LANG_MAX_VALUE+1];size_t used=0,i=0;int pixels=0,row=1,j,bottom=1;
  if(width>SCREENWIDTH-x)width=SCREENWIDTH-x;
- if(lines>(SCREENHEIGHT-y)/12)lines=(SCREENHEIGHT-y)/12;
+ /* M_WriteText advances 12 pixels per newline. Include each patch's
+    actual bottom extent; no graphics text may enter the y168 status bar. */
+ for(j=0;j<HU_FONTSIZE;j++){
+  int extent=SHORT(hu_font[j]->height)-SHORT(hu_font[j]->topoffset);
+  if(extent>bottom)bottom=extent;
+ }
+ if(y+bottom>168||width<=0||lines<=0)return;
+ if(lines>1+(168-y-bottom)/12)lines=1+(168-y-bottom)/12;
  Lang_MenuText(text,safe,sizeof(safe),LANG_MAX_VALUE,16);
  while(safe[i]&&used+2<sizeof(wrapped)&&row<=lines){
   unsigned char c=(unsigned char)safe[i++];int glyph=toupper(c)-HU_FONTSTART;
@@ -421,8 +433,9 @@ static void M_DrawGraphics(void){
   GraphicsStatus status=Graphics_Get(itemOn);
   M_GraphicsText(32,105,Lang_Text("graphics.actual"),72,1);
   M_GraphicsText(112,105,Lang_Text(Graphics_StateKey(status.state)),198,1);
-  M_GraphicsText(32,122,Lang_Text(status.reason),278,4);
-  if(strcmp(Graphics_PreferenceReason(),"graphics.reason.none"))M_GraphicsText(32,172,Lang_Text(Graphics_PreferenceReason()),278,2);
+  int warning=strcmp(Graphics_PreferenceReason(),"graphics.reason.none")!=0;
+  M_GraphicsText(32,122,Lang_Text(status.reason),278,warning?2:4);
+  if(warning)M_GraphicsText(32,146,Lang_Text(Graphics_PreferenceReason()),278,2);
  }
 }
 
@@ -1027,7 +1040,11 @@ char	msgNames[2][9]		= {"M_MSGOFF","M_MSGON"};
 
 void M_DrawOptions(void)
 {
+#ifdef _WIN32
+    V_DrawPatchDirect (108,3,0,W_CacheLumpName("M_OPTTTL",PU_CACHE));
+#else
     V_DrawPatchDirect (108,15,0,W_CacheLumpName("M_OPTTTL",PU_CACHE));
+#endif
 	
 #ifdef _WIN32
     if (Lang_HasTranslation(detailLevel ? "option.detail.low" : "option.detail.high")) {
@@ -2024,4 +2041,3 @@ void M_Init (void)
     }
     
 }
-

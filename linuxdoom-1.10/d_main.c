@@ -251,6 +251,10 @@ void D_Display (void)
 	    redrawsbar = true;
 	if (inhelpscreensstate && !inhelpscreens)
 	    redrawsbar = true;              // just put away the help screen
+	// Menus can cover the bar. Restore its background before each overlay
+	// and once after closing, including transitions between menu pages.
+	if (menuactive || menuactivestate)
+	    redrawsbar = true;
 	ST_Drawer (viewheight == 200, redrawsbar );
 	fullscreen = viewheight == 200;
 	break;
