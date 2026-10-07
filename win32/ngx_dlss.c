@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Nikolai Zhivotenko. GPLv2; see LICENSE.TXT. */
 #include "ngx_dlss.h"
+#include "graphics_settings.h"
 
 #include <stdio.h>
 
@@ -33,12 +34,14 @@ enum
 
 int Ngx_Wanted(void)
 {
-    return M_CheckParm("-nodlss") == 0 && M_CheckParm("-nosr") == 0;
+    return Graphics_Get(GRAPHICS_SR).requested;
 }
 
 #ifdef WINDOOM_HAS_NGX
 
 static int g_inited;
+static int g_carrier_evaluated;
+static const char *g_carrier_reason="none";
 static const char *g_failure = "not-initialized";
 static int g_last_present = -1;
 static const char *g_last_fallback = "";
@@ -567,7 +570,7 @@ static int ngx_create_dlaa(ID3D12GraphicsCommandList *cl)
     create.Feature.InPerfQualityValue = NVSDK_NGX_PerfQuality_Value_DLAA;
     create.InFeatureCreateFlags = NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
 
-    r = NGX_D3D12_CREATE_DLSS_EXT(cl, 1, 1, &g_handle_dlaa, g_params, &create);
+    r = ngx_inject("carrier-create") ? NVSDK_NGX_Result_Fail : NGX_D3D12_CREATE_DLSS_EXT(cl, 1, 1, &g_handle_dlaa, g_params, &create);
     if (NVSDK_NGX_FAILED(r) || !g_handle_dlaa)
     {
 	fprintf(stderr,
@@ -651,12 +654,13 @@ int Ngx_Init(void *device, void *queue)
     NVSDK_NGX_Result r;
     wchar_t path[MAX_PATH];
 
+    ngx_teardown(); /* fenced owner retries after failed init/create/evaluate */
     g_inited = 0;
     g_failure = "initializing";
     g_last_present = -1;
     g_last_fallback = "";
     g_evaluated_feature = "none";
-    g_sr_successes = g_sr_failures = 0;
+    g_carrier_evaluated = 0;g_carrier_reason="none";
     NgxRuntime_Reset();
     g_stack = 0;
     g_dlaa_failed = 0;
@@ -723,7 +727,7 @@ int Ngx_Init(void *device, void *queue)
     ngx_log_optimal();
 
     fprintf(stderr, "NGX extension: addon_file=%s addon_module=%s neural_rendering=unverified\n", ngx_renodx_present(path) ? "present" : "absent", NgxRuntime_AddonLoaded() ? "loaded" : "not-loaded");
-    g_stack = (g_mode == NGX_MODE_DLSS5) && NgxRuntime_AddonLoaded();
+    g_stack = (g_mode == NGX_MODE_DLSS5) && Graphics_Get(GRAPHICS_NR).requested && NgxRuntime_AddonLoaded();
     if (g_stack)
 	fprintf(stderr,
 		"NGX: RenoDX module loaded; requesting SR preset L then DLAA "
@@ -738,6 +742,19 @@ int Ngx_Init(void *device, void *queue)
     return 1;
 }
 
+int Ngx_Compiled(void){return 1;}
+int Ngx_DefaultNr(void){wchar_t directory[MAX_PATH],*slash;DWORD n=GetModuleFileNameW(NULL,directory,MAX_PATH);if(!n||n>=MAX_PATH)return 0;slash=wcsrchr(directory,L'\\');if(!slash)return 0;*slash=0;return ngx_resolve_mode(directory)==NGX_MODE_DLSS5;}
+NgxStatus Ngx_GetStatus(void){NgxStatus s={1,g_inited,g_carrier_evaluated,g_sr_successes,g_sr_failures,g_failure,g_carrier_reason,g_evaluated_feature};return s;}
+void Ngx_BeginFrame(void){g_carrier_evaluated=0;g_evaluated_feature="none";}
+int Ngx_DiagnosticFailure(const char *stage){return ngx_inject(stage);}
+void Ngx_CarrierUnavailable(void){g_dlaa_failed=1;g_carrier_reason="hires-allocation-failed";}
+void Ngx_SetCarrierRequested(int requested){
+ int next=g_inited&&g_mode==NGX_MODE_DLSS5&&requested&&NgxRuntime_AddonLoaded();
+ if(next!=g_stack||requested){
+  if(g_handle_dlaa)NVSDK_NGX_D3D12_ReleaseFeature(g_handle_dlaa);g_handle_dlaa=NULL;ngx_release_mid();
+  g_dlaa_failed=0;g_carrier_reason="none";g_carrier_evaluated=0;g_stack=next;
+ }
+}
 void Ngx_Shutdown(void)
 {
     fprintf(stderr, "NGX summary: sr_evaluate_successes=%u sr_evaluate_failures=%u last_evaluated_feature=%s\n", g_sr_successes, g_sr_failures, g_evaluated_feature);
@@ -831,7 +848,7 @@ static int ngx_eval_dlaa(ID3D12GraphicsCommandList *cl,
     ev.InMVScaleY = 4.0f;
     ev.InFrameTimeDeltaInMsec = GB_GetFrameInputs()->frame_delta_ms;
 
-    r = NGX_D3D12_EVALUATE_DLSS_EXT(cl, g_handle_dlaa, g_params, &ev);
+    r = ngx_inject("carrier-evaluate") ? NVSDK_NGX_Result_Fail : NGX_D3D12_EVALUATE_DLSS_EXT(cl, g_handle_dlaa, g_params, &ev);
     if (NVSDK_NGX_FAILED(r))
     {
 	fprintf(stderr,
@@ -841,6 +858,7 @@ static int ngx_eval_dlaa(ID3D12GraphicsCommandList *cl,
 	return 0;
     }
     g_evaluated_feature = "SR+DLAA (external NR unverified)";
+    g_carrier_evaluated=1;
     return 1;
 }
 
@@ -961,7 +979,7 @@ int Ngx_EvaluateStack(void *cmdlist, void *color, void *depth, void *linear_dept
 	!ngx_ensure_mid() ||
 	!ngx_create_dlaa(cl))
     {
-	g_dlaa_failed = 1;
+	g_dlaa_failed = 1;g_carrier_reason="carrier-create-failed";
 	return ngx_eval_sr(cl, (ID3D12Resource *)color,
 			   (ID3D12Resource *)depth,
 			   (ID3D12Resource *)velocity,
@@ -991,7 +1009,7 @@ int Ngx_EvaluateStack(void *cmdlist, void *color, void *depth, void *linear_dept
 		      (ID3D12Resource *)output, reset))
 	return 1;
 
-    g_dlaa_failed = 1;
+    g_dlaa_failed = 1;g_carrier_reason="carrier-evaluate-failed";
     ngx_copy_mid_to_out(cl, (ID3D12Resource *)output);
     return 1;
 }
@@ -1007,6 +1025,13 @@ void Ngx_RecordPresented(int used_ngx, const char *fallback_mode)
 
 #else /* !WINDOOM_HAS_NGX */
 
+int Ngx_Compiled(void){return 0;}
+int Ngx_DefaultNr(void){return 0;}
+NgxStatus Ngx_GetStatus(void){NgxStatus s={0,0,0,0,0,"not-compiled","not-compiled","none"};return s;}
+void Ngx_BeginFrame(void){}
+int Ngx_DiagnosticFailure(const char *stage){(void)stage;return 0;}
+void Ngx_CarrierUnavailable(void){}
+void Ngx_SetCarrierRequested(int requested){(void)requested;}
 void Ngx_RecordPresented(int used_ngx, const char *fallback_mode)
 {
     (void)used_ngx;

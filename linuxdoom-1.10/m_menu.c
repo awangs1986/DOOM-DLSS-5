@@ -37,6 +37,7 @@ rcsid[] = "$Id: m_menu.c,v 1.7 1997/02/03 22:45:10 b1 Exp $";
 #include "dstrings.h"
 #ifdef _WIN32
 #include "language.h"
+#include "graphics_settings.h"
 #endif
 
 #include "d_main.h"
@@ -349,9 +350,17 @@ enum
     mousesens,
     option_empty2,
     soundvol,
+#ifdef _WIN32
+    graphics,
+#endif
     opt_end
 } options_e;
 
+#ifdef _WIN32
+static void M_Graphics(int choice);
+static void M_GraphicsToggle(int choice);
+static void M_DrawGraphics(void);
+#endif
 menuitem_t OptionsMenu[]=
 {
     {1,"M_ENDGAM",	M_EndGame,'e'},
@@ -361,7 +370,10 @@ menuitem_t OptionsMenu[]=
     {-1,"",0},
     {2,"M_MSENS",	M_ChangeSensitivity,'m'},
     {-1,"",0},
-    {1,"M_SVOL",	M_Sound,'s'}
+    {1,"M_SVOL",	M_Sound,'s'},
+#ifdef _WIN32
+    {1,"",M_Graphics,'r'}
+#endif
 };
 
 menu_t  OptionsDef =
@@ -373,6 +385,48 @@ menu_t  OptionsDef =
     60,37,
     0
 };
+
+#ifdef _WIN32
+static menuitem_t GraphicsMenu[]={{2,"",M_GraphicsToggle,'r'},{2,"",M_GraphicsToggle,'s'},{2,"",M_GraphicsToggle,'n'}};
+static menu_t GraphicsDef={3,&OptionsDef,GraphicsMenu,M_DrawGraphics,42,46,0};
+static void M_Graphics(int choice){(void)choice;M_SetupNextMenu(&GraphicsDef);}
+static void M_GraphicsToggle(int choice){(void)choice;Graphics_SetRequested(itemOn,!Graphics_Get(itemOn).requested);}
+/* Convert UTF-8 first, then use the same glyph widths as M_WriteText. Each
+   row is bounded in pixels and y; a wide first row cannot eat later rows. */
+static void M_GraphicsText(int x,int y,const char *text,int width,int lines){
+ char safe[LANG_MAX_VALUE+1],wrapped[LANG_MAX_VALUE+1];size_t used=0,i=0;int pixels=0,row=1;
+ if(width>SCREENWIDTH-x)width=SCREENWIDTH-x;
+ if(lines>(SCREENHEIGHT-y)/12)lines=(SCREENHEIGHT-y)/12;
+ Lang_MenuText(text,safe,sizeof(safe),LANG_MAX_VALUE,16);
+ while(safe[i]&&used+2<sizeof(wrapped)&&row<=lines){
+  unsigned char c=(unsigned char)safe[i++];int glyph=toupper(c)-HU_FONTSTART;
+  int advance=glyph<0||glyph>=HU_FONTSIZE?4:SHORT(hu_font[glyph]->width);
+  if(c=='\n'||pixels+advance>width){
+   if(row>=lines)break;wrapped[used++]='\n';row++;pixels=0;
+   if(c=='\n')continue;
+  }
+  if(advance>width)continue;wrapped[used++]=(char)c;pixels+=advance;
+ }
+ wrapped[used]=0;M_WriteText(x,y,wrapped);
+}
+static void M_DrawGraphics(void){
+ static const char *labels[]={"graphics.rt","graphics.sr","graphics.nr"};int i;
+ M_GraphicsText(82,15,Lang_Text("graphics.title"),210,1);
+ for(i=0;i<3;i++){
+  GraphicsStatus status=Graphics_Get(i);
+  M_GraphicsText(GraphicsDef.x,GraphicsDef.y+i*LINEHEIGHT,Lang_Text(labels[i]),194,1);
+  M_GraphicsText(246,GraphicsDef.y+i*LINEHEIGHT,Lang_Text(status.requested?"option.state.on":"option.state.off"),64,1);
+ }
+ {
+  GraphicsStatus status=Graphics_Get(itemOn);
+  M_GraphicsText(32,105,Lang_Text("graphics.actual"),72,1);
+  M_GraphicsText(112,105,Lang_Text(Graphics_StateKey(status.state)),198,1);
+  M_GraphicsText(32,122,Lang_Text(status.reason),278,4);
+  if(strcmp(Graphics_PreferenceReason(),"graphics.reason.none"))M_GraphicsText(32,172,Lang_Text(Graphics_PreferenceReason()),278,2);
+ }
+}
+
+#endif
 
 //
 // Read This! MENU 1 & 2
@@ -1862,6 +1916,9 @@ void M_Drawer (void)
     for (i=0;i<max;i++)
     {
 #ifdef _WIN32
+        if (currentMenu == &OptionsDef && i == graphics) {
+            M_GraphicsText(x,y,Lang_Text("graphics.title"),SCREENWIDTH-x-8,1);
+        } else
         if (currentMenu == &OptionsDef && i == messages && Lang_HasTranslation("menu.messages")) {
             char label[32];
             Lang_MenuText(Lang_Text("menu.messages"), label, sizeof(label), 13, 1);

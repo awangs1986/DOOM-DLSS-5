@@ -78,6 +78,7 @@ set(DOOM_SOURCES
 
 add_executable(windoom
   ${DOOM_SOURCES}
+  win32/graphics_settings.c
   win32/frame_inputs.c
   win32/frame_trace.c
   win32/gbuffer.c
@@ -289,3 +290,8 @@ if(WINDOOM_DXR)
     message(STATUS "DXC absent; normal rendering works, DXR diagnostic shader unavailable")
   endif()
 endif()
+
+# Configure-only examples. Do not replace per-stage local effect values.
+add_custom_command(TARGET windoom POST_BUILD
+  COMMAND ${CMAKE_COMMAND} "-DSOURCE=${CMAKE_SOURCE_DIR}"
+    "-DDEST=$<TARGET_FILE_DIR:windoom>" -P "${CMAKE_SOURCE_DIR}/tools/stage-effect-defaults.cmake")

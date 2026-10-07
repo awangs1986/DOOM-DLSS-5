@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include "dxr_reflection.h"
+#include "graphics_settings.h"
 #include "reflection_config.h"
 #include "dxr_lighting.h"
 #include "dxr_map.h"
@@ -144,9 +145,10 @@ void copy(ID3D12GraphicsCommandList *list,ID3D12Resource *destination,bool expan
 }
 extern "C" void DxrReflection_Init(void *device,unsigned width,unsigned height) {
  state.device=static_cast<ID3D12Device*>(device);state.constants.width=width;state.constants.height=height;state.constants.row_words=(width*4+255)/256*64;
- int arg=M_CheckParm("-rt-materials");
- if(arg&&arg+1<myargc) {
-  FILE *file=nullptr;fopen_s(&file,myargv[arg+1],"rb");
+ int arg=M_CheckParm("-rt-materials");char default_path[4096]={};
+ const char *config_path=arg?(arg+1<myargc?myargv[arg+1]:nullptr):(Graphics_DefaultResource("rt-materials.cfg",default_path,sizeof(default_path))?default_path:nullptr);
+ if(config_path) {
+  FILE *file=nullptr;fopen_s(&file,config_path,"rb");
   if(file) {
    try {
     std::vector<char> text(REFLECTION_MAX_CONFIG_BYTES+1);size_t size=std::fread(text.data(),1,text.size(),file);bool ok=!std::ferror(file);std::fclose(file);file=nullptr;char reason[160]={};
@@ -159,7 +161,7 @@ extern "C" void DxrReflection_Init(void *device,unsigned width,unsigned height) 
   } else std::fprintf(stderr,"RT reflection: config unavailable; original/light scene retained\n");
  }
  int b=M_CheckParm("-rt-ray-budget");if(b&&b+1<myargc){char *end=nullptr;long value=std::strtol(myargv[b+1],&end,10);if(*myargv[b+1]&&!*end&&value>=1&&value<=64)state.budget=(unsigned)value;else{state.configured=false;state.reason="invalid-ray-budget";}}
- state.requested=state.configured&&!M_CheckParm("-nort")&&!M_CheckParm("-rt-reflections-off");
+ state.requested=arg&&state.configured&&!M_CheckParm("-nort")&&!M_CheckParm("-rt-reflections-off");
  if(width!=1280||height!=800){state.failed=true;state.reason="unsupported-output-size";}
  else if(!state.configured&&!std::strcmp(state.reason,"not-configured"))state.reason="not-configured";
  else if(state.configured)state.reason=state.requested?"pending-scene":"disabled";
