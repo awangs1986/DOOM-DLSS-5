@@ -252,7 +252,7 @@ extern "C" int DxrLighting_Evaluate(void *commands,void *scene_texture) {
         copy(list,static_cast<ID3D12Resource*>(scene_texture),false);
         if(state.readback){list->CopyBufferRegion(state.readback.Get(),0,state.results.Get(),0,count*sizeof(Result));state.pending=true;}
         state.frame=GB_GetFrameInputs()->frame_id;state.tic=GB_GetFrameInputs()->game_tic;state.generation=scene->generation;
-        state.active=true;state.reason="active-opaque-hard-light";return 1;
+        state.active=true;state.reason="active-alpha-point-light";return 1;
     }catch(const std::exception& e){state.failed=true;state.reason="lighting-frame-failed";std::fprintf(stderr,"RT point light: frame failed: %s; original scene retained\n",e.what());return 0;}
 }
 extern "C" int DxrLighting_PresentNearest(void *commands,void *backbuffer) {
