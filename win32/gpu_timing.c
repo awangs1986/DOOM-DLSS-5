@@ -11,7 +11,7 @@
 #include <fcntl.h>
 #include "gpu_timing.h"
 
-#define TIMESTAMP_COUNT 6
+#define TIMESTAMP_COUNT 8
 static ID3D12QueryHeap *queries;
 static ID3D12Resource *readback;
 static IDXGIAdapter3 *adapter;
@@ -86,7 +86,7 @@ void GpuTiming_Init(ID3D12Device *device, ID3D12CommandQueue *queue,
     csv = _fdopen(fd, "w");
     if (!csv) { _close(fd); goto unavailable; }
     timeline = export_timeline;
-    fprintf(csv, "frame,game_tic,export_sequence_seconds,gpu_ms,upload_ms,sr_ms,compose_ms,export_copy_ms,local_memory_bytes,local_budget_bytes,rt_ms\n");
+    fprintf(csv, "frame,game_tic,export_sequence_seconds,gpu_ms,upload_ms,sr_ms,compose_ms,export_copy_ms,local_memory_bytes,local_budget_bytes,rt_ms,reflection_trace_ms,reflection_filter_ms\n");
     fflush(csv);
     fprintf(stderr, "gpu-timing: D3D12 timestamps (%llu ticks/s); CSV -> %s\n",
               (unsigned long long)frequency, csv_path);
@@ -106,11 +106,19 @@ void GpuTiming_Begin(ID3D12GraphicsCommandList *commands, int game_tic)
 void GpuTiming_Mark(ID3D12GraphicsCommandList *commands, unsigned stage)
 {
     if (csv && stage > 0 && stage <= 3)
-        ID3D12GraphicsCommandList_EndQuery(commands, queries, D3D12_QUERY_TYPE_TIMESTAMP, stage == 1 ? 1 : stage + 1);
+        ID3D12GraphicsCommandList_EndQuery(commands, queries, D3D12_QUERY_TYPE_TIMESTAMP, stage == 1 ? 1 : stage + 3);
 }
 void GpuTiming_LightingEnd(ID3D12GraphicsCommandList *commands)
 {
     if (csv) ID3D12GraphicsCommandList_EndQuery(commands, queries, D3D12_QUERY_TYPE_TIMESTAMP, 2);
+}
+void GpuTiming_ReflectionTraceEnd(ID3D12GraphicsCommandList *commands)
+{
+    if (csv) ID3D12GraphicsCommandList_EndQuery(commands, queries, D3D12_QUERY_TYPE_TIMESTAMP, 3);
+}
+void GpuTiming_ReflectionEnd(ID3D12GraphicsCommandList *commands)
+{
+    if (csv) ID3D12GraphicsCommandList_EndQuery(commands, queries, D3D12_QUERY_TYPE_TIMESTAMP, 4);
 }
 void GpuTiming_End(ID3D12GraphicsCommandList *commands)
 {
@@ -149,13 +157,13 @@ void GpuTiming_Collect(void)
                                DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memory));
     fprintf(csv, "%llu,%d,", (unsigned long long)frame, measured_game_tic);
     if (timeline) fprintf(csv, "%.9f", (double)(frame - 1) / 35.0);
-    fprintf(csv, ",%.6f,%.6f,%.6f,%.6f,%.6f,", (ticks[5] - ticks[0]) * ms,
-               (ticks[1] - ticks[0]) * ms, (ticks[3] - ticks[2]) * ms,
-               (ticks[4] - ticks[3]) * ms, (ticks[5] - ticks[4]) * ms);
+    fprintf(csv, ",%.6f,%.6f,%.6f,%.6f,%.6f,", (ticks[7] - ticks[0]) * ms,
+               (ticks[1] - ticks[0]) * ms, (ticks[5] - ticks[4]) * ms,
+               (ticks[6] - ticks[5]) * ms, (ticks[7] - ticks[6]) * ms);
     if (memory_available) fprintf(csv, "%llu,%llu", (unsigned long long)memory.CurrentUsage,
                                                 (unsigned long long)memory.Budget);
     else fprintf(csv, ",");
-    fprintf(csv, ",%.6f", (ticks[2] - ticks[1]) * ms);
+    fprintf(csv, ",%.6f,%.6f,%.6f", (ticks[2] - ticks[1]) * ms, (ticks[3] - ticks[2]) * ms, (ticks[4] - ticks[3]) * ms);
     fputc('\n', csv);
     fflush(csv);
     ID3D12Resource_Unmap(readback, 0, &written);
