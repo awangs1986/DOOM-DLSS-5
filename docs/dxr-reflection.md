@@ -30,8 +30,24 @@ material flat FLOOR0_1 1 0.1 0.04 0 0 0
 
 `-rt-reflection-stats <新文件>` 记录实际 rays/hit/miss/error/exhausted、alpha 拒绝、命中阴影、预算、变色数量，以及反射 reset 请求、实际时间评价 reset 参数、成功 NGX/FSR 路径和冻结输入状态。
 
-`-rt-reflection-pixels <新文件> -rt-reflection-pixel-tic <tic>` 记录一次所选 game tic 的真实接收者/命中世界坐标、UV、surface/triangle/instance/geometry、源 palette/COLORMAP 索引、次级 radiance、最终颜色与遍历次数。输出路径必须不存在；观察文件失败不阻断渲染。
+`-rt-reflection-pixels <新文件> -rt-reflection-pixel-tic <tic>` 记录一次所选 game tic 的真实接收者/命中世界坐标、UV、surface/triangle/instance/geometry、源 palette/COLORMAP 索引、次级 radiance、最终颜色与遍历次数。`reflection_candidate_*` 单独记录反射遍历中最后一次实际 alpha 候选的 UV、surface 与 alpha；没有候选时 surface 为 `4294967295`。`geometry_revision`、`shading_revision` 与已有 generation/material revision 来自同一当帧借用场景，可与 `-map-updates` 按 frame/game tic 对照。输出路径必须不存在；观察文件失败不阻断渲染。
+
+纹理取样使用 GPU 实际插值后的 float UV，再按共享规则取整。解析式恰好落在整数边界时，GPU 的浮点插值可能落到相邻 texel；验收须保留这些样本，并用实际候选 UV 读取原始 post。不能把所有边界样本删除后报告透明裁剪通过。
 
 `-gpu-timing <新文件>` 新增 `reflection_trace_ms` 与 `reflection_filter_ms`。trace 包含 GPU trace dispatch，filter 段包含空间合成、输出拷贝和开启时的观察 readback，故不是纯 shader 指令耗时。原 `rt_ms` 仍是点照明段。
 
 原生构建通过只证明源码与 shader 可编译；地图反射、材质、透明、动态、调色板、UI 与 SR 组合结果必须以实际运行证据单独报告。
+
+## 2026-10-07 验收范围
+
+实际编译和运行的源码为 `79055b0f6dcbe000ca8ee9ace18fd26c2218a57b`；此后本节及观察字段说明只修改文档。Windows 原生 original/SR 两个构建完成，51 次独立运行均正常退出：22 个主场景、17 个 floor/alpha/阴影/伤害场景、10 个门/平台场景、2 个实机窗口场景。每次运行的 EXE 与现有 CSO 的 SHA-256 均与该构建对应。
+
+- 屏外材质 A/B：关闭反射时 original/SR 输出均无差异；启用后分别有 13,440/159,654 个最终输出像素变化。10,296 个实际主场景接收者的纹理、COLORMAP、PLAYPAL/gamma、反射合成复算无差异；覆盖层验收的 381,056 个像素保持原字节。
+- floor 的屏外隐藏目标有 2,304 个实际命中；次级 alpha 的 1,653 个实际候选与原始 post 无差异。6 个整数边界差异逐个保留，均由实际 GPU UV 的行 86 与理想解析式的行 87 区别解释。真实伤害 tic 163 的 10,296 个接收者只匹配活动 PLAYPAL 第 2 组。
+- 正常 Use/转向 demo 触发真实门、平台运动。108 个静止主墙接收者随门打开改变次级命中，6,417 个随平台下降改变次级命中；门关闭/平台上升后，所选次级字段全部恢复。对应原场景像素未改变，GPU 的 frame/generation/material/geometry/shading revision 与同帧地图高度记录一致。
+- 粗糙度验收复算 9,383 个实际过滤样本，15,419 个邻居被拒绝；合成通道误差为零。静止区域 164,736 个输出像素在 tic 70/175 间无变化。实际 SR 路径报告 NGX 成功且当帧 reset 参数为 1；这仍不表示 NR 路径运行。
+- 2 次实机窗口包含游戏、暂停和菜单，7 次捕获均确认该进程拥有的窗口为前台。实际 client 为 2560×1562，导出图为 1280×800；实机截图仅用于操作和外观证据，逐像素验收使用 GPU readback 与引擎导出图。
+
+开启观察的 219 个主场景帧，反射 trace 平均约 0.065 ms，filter/copy/readback 平均约 0.689 ms；original/SR 全部 GPU 段平均约 1.117/1.494 ms。数据包含导出及观察成本，不是无观察的游戏性能承诺。该场景整进程 local memory 在所有观测帧保持 100,319,232 字节；SR 为 181,731,328 字节。反射自身逻辑 buffer 的静态上限约为 18,314,496 字节，启用观察再加 9,472,000 字节；不含 D3D12 分配对齐、驱动与 pipeline 开销，也不重复计入借用的场景、TLAS、atlas 或照明资源。
+
+完整原始 CSV、运行参数、源码/构建/runtime SHA-256、导出图、独立复算及早期失败记录作为该验收的外部证据保留。当前结论限于本节列出的构建、配置和实际场景；递归反射、sprite 反射、任意分辨率和无全局 reset 的反射历史均未实现。
