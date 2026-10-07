@@ -265,7 +265,9 @@ if(WINDOOM_DXR)
       COMMAND ${CMAKE_COMMAND} -E make_directory "${_wd_runtime_dir}/shaders"
       COMMAND "${DXC_EXECUTABLE}" -T cs_6_5 -E main -O3
         -Fo "${_wd_light_shader}" "${CMAKE_CURRENT_SOURCE_DIR}/win32/shaders/dxr/lighting.hlsl"
-      DEPENDS win32/shaders/dxr/lighting.hlsl win32/shaders/dxr/scene-hit.hlsli VERBATIM)
+      DEPENDS win32/shaders/dxr/lighting.hlsl win32/shaders/dxr/scene-hit.hlsli
+        win32/shaders/dxr/rt-material-layout.hlsli win32/shaders/dxr/material-sample.hlsli
+        win32/shaders/dxr/alpha-trace.hlsli VERBATIM)
     add_custom_target(windoom_light_shader DEPENDS "${_wd_light_shader}")
     add_dependencies(windoom windoom_light_shader)
     message(STATUS "DXR diagnostic DXC: ${DXC_EXECUTABLE}")
