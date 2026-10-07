@@ -1,4 +1,4 @@
-// One deterministic point light, at most one opaque visibility ray per receiver.
+// One deterministic point light, at most one bounded alpha visibility ray per receiver.
 #include "scene-hit.hlsli"
 #include "rt-material-layout.hlsli"
 RaytracingAccelerationStructure scene : register(t0);
