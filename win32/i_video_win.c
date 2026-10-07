@@ -216,6 +216,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 {
     event_t ev;
 
+    if ((msg == WM_KEYDOWN || msg == WM_KEYUP ||
+         msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP) &&
+        M_CheckParm("-input-trace"))
+        fprintf(stderr, "Input window event: message=%u vk=%llu translated=%d previous=%d scan=%u menu=%d tic=%d layout=%p\n",
+                msg, (unsigned long long)wparam, xlatekey(wparam),
+                (int)((lparam >> 30) & 1), (unsigned)((lparam >> 16) & 255),
+                menuactive != 0, gametic, (void *)GetKeyboardLayout(0));
+
     switch (msg)
     {
       case WM_CLOSE:
