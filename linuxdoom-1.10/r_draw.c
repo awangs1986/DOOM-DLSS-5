@@ -164,7 +164,14 @@ void R_DrawColumn (void)
     {
 	// Re-map color indices from wall texture column
 	//  using a lighting/special effects LUT.
-	*dest = dc_colormap[dc_source[(frac>>FRACBITS)&127]];
+        {
+            byte raw=dc_source[(frac>>FRACBITS)&127];
+            byte mapped=dc_colormap[raw];
+#ifdef _WIN32
+            GB_RecordMaterialSample((int)(dest-screens[0]),raw,mapped);
+#endif
+            *dest=mapped;
+        }
 	
 	dest += SCREENWIDTH; 
 	frac += fracstep;
@@ -265,7 +272,14 @@ void R_DrawColumnLow (void)
     do 
     {
 	// Hack. Does not work corretly.
-	*dest2 = *dest = dc_colormap[dc_source[(frac>>FRACBITS)&127]];
+        {
+            byte raw=dc_source[(frac>>FRACBITS)&127], mapped=dc_colormap[raw];
+#ifdef _WIN32
+            GB_RecordMaterialSample((int)(dest-screens[0]),raw,mapped);
+            GB_RecordMaterialSample((int)(dest2-screens[0]),raw,mapped);
+#endif
+            *dest2=*dest=mapped;
+        }
 	dest += SCREENWIDTH;
 	dest2 += SCREENWIDTH;
 	frac += fracstep; 
@@ -574,7 +588,13 @@ void R_DrawSpan (void)
 
 	// Lookup pixel from flat texture tile,
 	//  re-index using light/colormap.
-	*dest++ = ds_colormap[ds_source[spot]];
+        {
+            byte raw=ds_source[spot], mapped=ds_colormap[raw];
+#ifdef _WIN32
+            GB_RecordMaterialSample((int)(dest-screens[0]),raw,mapped);
+#endif
+            *dest++=mapped;
+        }
 
 	// Next step in u,v.
 	xfrac += ds_xstep; 
@@ -688,8 +708,20 @@ void R_DrawSpanLow (void)
 	spot = ((yfrac>>(16-6))&(63*64)) + ((xfrac>>16)&63);
 	// Lowres/blocky mode does it twice,
 	//  while scale is adjusted appropriately.
-	*dest++ = ds_colormap[ds_source[spot]]; 
-	*dest++ = ds_colormap[ds_source[spot]];
+        {
+            byte raw=ds_source[spot], mapped=ds_colormap[raw];
+#ifdef _WIN32
+            GB_RecordMaterialSample((int)(dest-screens[0]),raw,mapped);
+#endif
+            *dest++=mapped;
+        }
+        {
+            byte raw=ds_source[spot], mapped=ds_colormap[raw];
+#ifdef _WIN32
+            GB_RecordMaterialSample((int)(dest-screens[0]),raw,mapped);
+#endif
+            *dest++=mapped;
+        }
 	
 	xfrac += ds_xstep; 
 	yfrac += ds_ystep; 

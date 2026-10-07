@@ -17,6 +17,9 @@ typedef struct {
 } DxrMapSceneView;
 void DxrMap_Init(void *device, void *queue, unsigned width, unsigned height,
                  int mode, int disabled); /* mode 0=off,1=depth,2=normal */
+/* Ordinary RT consumers request the same scene independently of diagnostics. */
+void DxrMap_RequestScene(int requested);
+int DxrMap_Available(void);
 void DxrMap_Prepare(void); /* caller has waited renderer queue */
 int DxrMap_Render(void *commands, void *backbuffer); /* COPY_DEST, preserves UI */
 void DxrMap_Toggle(void);

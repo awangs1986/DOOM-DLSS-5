@@ -30,6 +30,10 @@ static float         gb_velocity[GB_PIX * 2];
 static float         gb_obj_du[GB_PIX];
 static float         gb_obj_dv[GB_PIX];
 static unsigned char gb_palette[256 * 3];
+static unsigned char gb_base_palette[768], gb_raw_palette[768], gb_gamma[256];
+static GB_MaterialSample gb_material[GB_PIX];
+static int gb_material_kind = GB_KIND_SKY;
+static unsigned int gb_material_id;
 
 static float gb_col_z;
 static float gb_col_nx, gb_col_ny, gb_col_nz;
@@ -49,6 +53,7 @@ static void gb_clear_aux(void)
     int i;
 
     memset(gb_scene_mask, 0, sizeof(gb_scene_mask));
+    memset(gb_material, 0, sizeof(gb_material));
     memset(gb_surface_kind, GB_KIND_SKY, sizeof(gb_surface_kind));
     memset(gb_depth, 0, sizeof(gb_depth));
     memset(gb_normal, 0, sizeof(gb_normal));
@@ -426,6 +431,28 @@ void GB_SetPaletteRGB(const unsigned char *rgb768)
 {
     memcpy(gb_palette, rgb768, 256 * 3);
 }
+void GB_SetBasePaletteRGB(const unsigned char *palette) { memcpy(gb_base_palette,palette,768); }
+void GB_SetRawPaletteRGB(const unsigned char *palette, const unsigned char *gamma)
+{
+    memcpy(gb_raw_palette,palette,768); memcpy(gb_gamma,gamma,256);
+}
+const unsigned char *GB_BasePaletteRGB(void) { return gb_base_palette; }
+const unsigned char *GB_RawPaletteRGB(void) { return gb_raw_palette; }
+const unsigned char *GB_GammaLUT(void) { return gb_gamma; }
+void GB_SetMaterialContext(int kind, unsigned int id)
+{
+    gb_material_kind=kind; gb_material_id=id;
+}
+void GB_RecordMaterialSample(int offset, unsigned char source, unsigned char ambient)
+{
+    GB_MaterialSample *sample;
+    if(gb_overlay_drawing || (unsigned)offset>=GB_PIX) return;
+    sample=&gb_material[offset];
+    sample->source_index=source; sample->ambient_index=ambient;
+    sample->kind=(unsigned char)gb_material_kind; sample->material_id=gb_material_id;
+    sample->valid=gb_material_kind>=GB_KIND_WALL && gb_material_kind<=GB_KIND_CEILING && !fixedcolormap;
+}
+const GB_MaterialSample *GB_MaterialSamples(void) { return gb_material; }
 
 void GB_ConvertColor(const unsigned char *src8)
 {
@@ -450,8 +477,8 @@ void GB_SetDebugView(int view)
 {
     if (view < GB_VIEW_COLOR)
 	view = GB_VIEW_COLOR;
-    if (view > GB_VIEW_OVERLAY_MASK)
-        view = GB_VIEW_OVERLAY_MASK;
+    if (view > GB_VIEW_MATERIAL_MASK)
+        view = GB_VIEW_MATERIAL_MASK;
     if (gb_debug_view != view) GB_RequestResetReason(GB_RESET_VIEW);
     gb_debug_view = view;
 }
@@ -531,6 +558,14 @@ void GB_ComposePresent(unsigned char *dst_bgra, int dst_w, int dst_h)
 	    src = sy * GB_WIDTH + sx;
 	    switch (gb_debug_view)
             {
+              case GB_VIEW_ALBEDO:
+                r=gb_material[src].valid && gb_scene_mask[src] ? gb_base_palette[gb_material[src].source_index*3] : 0;
+                g=gb_material[src].valid && gb_scene_mask[src] ? gb_base_palette[gb_material[src].source_index*3+1] : 0;
+                b=gb_material[src].valid && gb_scene_mask[src] ? gb_base_palette[gb_material[src].source_index*3+2] : 0;
+                break;
+              case GB_VIEW_MATERIAL_MASK:
+                r=g=b=gb_material[src].valid && gb_scene_mask[src] ? 255 : 0;
+                break;
               case GB_VIEW_SCENE_MASK:
                 r = g = b = gb_scene_mask[src] ? 255 : 0;
                 break;

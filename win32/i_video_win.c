@@ -21,6 +21,8 @@
 #include "i_system.h"
 #include "i_video.h"
 #include "v_video.h"
+#include "w_wad.h"
+#include "z_zone.h"
 #include "gbuffer.h"
 #include "m_argv.h"
 #include "ngx_dlss.h"
@@ -30,6 +32,7 @@
 #include "gpu_timing.h"
 #include "dxr_diagnostic.h"
 #include "dxr_map.h"
+#include "dxr_lighting.h"
 #include "render_adapter.h"
 #include "frame_trace.h"
 
@@ -963,6 +966,7 @@ void I_FinishUpdate(void)
     int used_ngx = 0;
     int used_a4k = 0;
     int used_fsr2 = 0;
+    int used_rt = 0;
     int reset;
 
     {
@@ -983,6 +987,7 @@ void I_FinishUpdate(void)
     GpuTiming_Collect();
     DxrDiag_Prepare();
     DxrMap_Prepare();
+    DxrLighting_Prepare();
     idx = IDXGISwapChain3_GetCurrentBackBufferIndex(g_swap);
     ID3D12CommandAllocator_Reset(g_alloc);
     ID3D12GraphicsCommandList_Reset(g_cmd, g_alloc, NULL);
@@ -1010,6 +1015,8 @@ void I_FinishUpdate(void)
 	       GB_WIDTH, GB_HEIGHT, 8, DXGI_FORMAT_R32G32_FLOAT);
 
     GpuTiming_Mark(g_cmd, 1);
+    used_rt = DxrLighting_Evaluate(g_cmd, g_tex_color);
+    GpuTiming_LightingEnd(g_cmd);
     if (Ngx_Ready() && Ngx_ShowEvalOutput() &&
 	GB_GetDebugView() == GB_VIEW_COLOR &&
 	GB_HasScenePixels())
@@ -1115,6 +1122,12 @@ void I_FinishUpdate(void)
          * scene depth or palette difference to classify their visibility. */
         overlay_hud_on_bb(g_bb[idx]);
     }
+    else if (used_rt)
+    {
+        barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_COPY_DEST);
+        DxrLighting_PresentNearest(g_cmd, g_bb[idx]);
+        overlay_hud_on_bb(g_bb[idx]);
+    }
     else
     {
         GB_ComposePresent(g_present, WIN_W, WIN_H);
@@ -1157,6 +1170,7 @@ void I_ReadScreen(byte *scr)
 
 void I_SetPalette(byte *palette)
 {
+    GB_SetRawPaletteRGB(palette,gammatable[usegamma]);
     int i;
     int r, g, b;
 
@@ -1181,6 +1195,7 @@ void I_ShutdownGraphics(void)
     GpuTiming_Collect();
     GpuTiming_Shutdown();
     DxrDiag_Shutdown();
+    DxrLighting_Shutdown();
     DxrMap_Shutdown();
     Png_Shutdown();
     Anime4K_Shutdown();
@@ -1245,6 +1260,7 @@ void I_InitGraphics(void)
     QueryPerformanceFrequency(&g_frame_frequency);
     g_frame_last.QuadPart = 0;
     GB_Init();
+    GB_SetBasePaletteRGB(W_CacheLumpName("PLAYPAL",PU_CACHE));
     {
         int p = M_CheckParm("-frame-inputs");
         if (p && p + 1 < myargc) FrameTrace_Init(myargv[p + 1]);
@@ -1259,6 +1275,10 @@ void I_InitGraphics(void)
         GB_SetDebugView(GB_VIEW_SCENE_MASK);
     else if (M_CheckParm("-overlay-mask"))
         GB_SetDebugView(GB_VIEW_OVERLAY_MASK);
+    else if (M_CheckParm("-albedo"))
+        GB_SetDebugView(GB_VIEW_ALBEDO);
+    else if (M_CheckParm("-material-mask"))
+        GB_SetDebugView(GB_VIEW_MATERIAL_MASK);
     else if (M_CheckParm("-color"))
 	GB_SetDebugView(GB_VIEW_COLOR);
 
@@ -1305,6 +1325,7 @@ void I_InitGraphics(void)
                  M_CheckParm("-rt-diagnostic") != 0 && !M_CheckParm("-rt-map-depth") && !M_CheckParm("-rt-map-normal"), M_CheckParm("-nort") != 0);
     DxrMap_Init(g_dev, g_queue, WIN_W, WIN_H,
                 M_CheckParm("-rt-map-normal") ? 2 : (M_CheckParm("-rt-map-depth") ? 1 : 0), M_CheckParm("-nort") != 0);
+    DxrLighting_Init(g_dev, WIN_W, WIN_H);
     if (Ngx_Wanted())
 	Ngx_Init(g_dev, g_queue);
     else

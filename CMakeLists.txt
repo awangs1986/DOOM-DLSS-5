@@ -58,6 +58,7 @@ set(DOOM_SOURCES
   ${DOOM_DIR}/p_user.c
   ${DOOM_DIR}/r_bsp.c
   ${DOOM_DIR}/r_data.c
+  ${DOOM_DIR}/r_material_copy.c
   ${DOOM_DIR}/r_draw.c
   ${DOOM_DIR}/r_main.c
   ${DOOM_DIR}/r_plane.c
@@ -82,6 +83,8 @@ add_executable(windoom
   win32/gbuffer.c
   win32/dxr_diagnostic.cpp
   win32/dxr_map.cpp
+  win32/dxr_lighting.cpp
+  win32/rt_materials.cpp
   win32/map_mesh.cpp
   win32/map_source.c
   win32/render_adapter.c
@@ -257,6 +260,14 @@ if(WINDOOM_DXR)
       DEPENDS win32/shaders/dxr/map.hlsl win32/shaders/dxr/scene-hit.hlsli VERBATIM)
     add_custom_target(windoom_map_shader DEPENDS "${_wd_map_shader}")
     add_dependencies(windoom windoom_map_shader)
+    set(_wd_light_shader "${_wd_runtime_dir}/shaders/dxr_lighting.cso")
+    add_custom_command(OUTPUT "${_wd_light_shader}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_wd_runtime_dir}/shaders"
+      COMMAND "${DXC_EXECUTABLE}" -T cs_6_5 -E main -O3
+        -Fo "${_wd_light_shader}" "${CMAKE_CURRENT_SOURCE_DIR}/win32/shaders/dxr/lighting.hlsl"
+      DEPENDS win32/shaders/dxr/lighting.hlsl win32/shaders/dxr/scene-hit.hlsli VERBATIM)
+    add_custom_target(windoom_light_shader DEPENDS "${_wd_light_shader}")
+    add_dependencies(windoom windoom_light_shader)
     message(STATUS "DXR diagnostic DXC: ${DXC_EXECUTABLE}")
   else()
     message(STATUS "DXC absent; normal rendering works, DXR diagnostic shader unavailable")

@@ -28,6 +28,8 @@ static const char
 rcsid[] = "$Id: r_data.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 
 #include <stdint.h>
+#include <limits.h>
+#include <string.h>
 
 #include "i_system.h"
 #include "z_zone.h"
@@ -38,6 +40,7 @@ rcsid[] = "$Id: r_data.c,v 1.4 1997/02/03 16:47:55 b1 Exp $";
 
 #include "doomdef.h"
 #include "r_local.h"
+#include "r_material.h"
 #include "p_local.h"
 
 #include "doomstat.h"
@@ -849,3 +852,93 @@ void R_PrecacheLevel (void)
 
 
 
+/* Optional RT material export: bounded copies, never retained cache pointers. */
+int R_DescribeTexture(unsigned id, R_MaterialDescription *out)
+{
+    texture_t *t;
+    if (!out || id >= (unsigned)numtextures || !textures || !(t=textures[id]) ||
+        t->width <= 0 || t->height <= 0 || t->width > R_MATERIAL_MAX_DIMENSION ||
+        t->height > R_MATERIAL_MAX_DIMENSION ||
+        (size_t)t->width*t->height > R_MATERIAL_MAX_PIXELS) return 0;
+    out->id=id; out->width=t->width; out->height=t->height;
+    out->width_mask=texturewidthmask[id]; memcpy(out->name,t->name,8); out->name[8]=0;
+    return 1;
+}
+unsigned R_MaterialCount(int flat_namespace)
+{
+    int count=flat_namespace ? numflats : numtextures;
+    return count>0 && count<=1048576 ? (unsigned)count : 0;
+}
+int R_DescribeFlat(unsigned id, R_MaterialDescription *out)
+{
+    int lump;
+    if(!out || id>=R_MaterialCount(1) || firstflat<0 ||
+       id>(unsigned)INT_MAX-(unsigned)firstflat) return 0;
+    lump=firstflat+(int)id;
+    if(lump>=numlumps || W_LumpLength(lump)!=4096) return 0;
+    out->id=id; out->width=out->height=64; out->width_mask=63;
+    memcpy(out->name,lumpinfo[lump].name,8); out->name[8]=0; return 1;
+}
+int R_ResolveTexture(unsigned id, unsigned *resolved)
+{
+    int actual;
+    if (!resolved || id >= (unsigned)numtextures || !texturetranslation) return 0;
+    actual=texturetranslation[id];
+    if (actual < 0 || actual >= numtextures) return 0;
+    *resolved=(unsigned)actual; return 1;
+}
+int R_ResolveFlat(unsigned id, unsigned *resolved)
+{
+    int actual;
+    if (!resolved || id >= (unsigned)numflats || !flattranslation) return 0;
+    actual=flattranslation[id];
+    if (actual < 0 || actual >= numflats) return 0;
+    *resolved=(unsigned)actual; return 1;
+}
+int R_CopyTextureIndexedAlpha(unsigned id, unsigned char *indices,
+                             unsigned char *alpha, size_t capacity)
+{
+    R_MaterialDescription description;
+    texture_t *t; size_t pixels; int p;
+    if (!indices || !alpha || !R_DescribeTexture(id,&description)) return 0;
+    pixels=(size_t)description.width*description.height;
+    if (capacity < pixels) return 0;
+    t=textures[id];
+    if(t->patchcount <= 0 || t->patchcount > 4096) return 0;
+    memset(indices,0,pixels); memset(alpha,0,pixels);
+    for(p=0;p<t->patchcount;p++) {
+        texpatch_t *placement=&t->patches[p];
+        int size;
+        if(placement->patch < 0 || placement->patch >= numlumps) return 0;
+        size=W_LumpLength(placement->patch);
+        if(size<8 || size>64*1024*1024) return 0;
+        if(!R_ComposeMaterialPatch(W_CacheLumpNum(placement->patch,PU_CACHE),
+             (size_t)size,placement->originx,placement->originy,
+             description.width,description.height,indices,alpha,capacity)) return 0;
+    }
+    return 1;
+}
+int R_CopyFlatIndexed(unsigned id, unsigned char *indices, size_t capacity)
+{
+    int lump;
+    if(!indices || capacity<4096 || id >= (unsigned)numflats || firstflat<0 ||
+       id > (unsigned)INT_MAX-(unsigned)firstflat) return 0;
+    lump=firstflat+(int)id;
+    if(lump>=numlumps || W_LumpLength(lump)!=4096) return 0;
+    memcpy(indices,W_CacheLumpNum(lump,PU_CACHE),4096); return 1;
+}
+
+unsigned R_ColorMapCount(void)
+{
+    int lump=W_CheckNumForName("COLORMAP"), length;
+    if(lump<0 || lump>=numlumps) return 0;
+    length=W_LumpLength(lump);
+    return length>0 && length<=65536 && !(length%256) ? (unsigned)length/256 : 0;
+}
+int R_CopyColorMap(unsigned row, unsigned char *indices, size_t capacity)
+{
+    int lump;
+    if(!indices || capacity<256 || row>=R_ColorMapCount()) return 0;
+    lump=W_GetNumForName("COLORMAP");
+    memcpy(indices,(byte*)W_CacheLumpNum(lump,PU_CACHE)+(size_t)row*256,256); return 1;
+}

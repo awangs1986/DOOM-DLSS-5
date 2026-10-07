@@ -421,6 +421,7 @@ void R_DrawPlanes (void)
 		    dc_source = R_GetColumn(skytexture, angle);
 #ifdef _WIN32
 		    GB_SetColumn(x, 8192.0f, 0.0f, 1.0f, 0.0f, GB_KIND_SKY);
+                    GB_SetMaterialContext(GB_KIND_SKY,0);
 #endif
 		    colfunc ();
 		}
@@ -435,6 +436,7 @@ void R_DrawPlanes (void)
 	
 #ifdef _WIN32
 	gb_ceiling = (pl->height > viewz);
+        GB_SetMaterialContext(gb_ceiling ? GB_KIND_CEILING : GB_KIND_FLOOR,(unsigned)pl->picnum);
 #endif
 	planeheight = abs(pl->height-viewz);
 	light = (pl->lightlevel >> LIGHTSEGSHIFT)+extralight;

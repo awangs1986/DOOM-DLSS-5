@@ -22,13 +22,30 @@ enum
     GB_VIEW_NORMAL,
     GB_VIEW_VELOCITY,
     GB_VIEW_SCENE_MASK,
-    GB_VIEW_OVERLAY_MASK
+    GB_VIEW_OVERLAY_MASK,
+    GB_VIEW_ALBEDO,
+    GB_VIEW_MATERIAL_MASK
 };
 
 #define GB_WIDTH   320
 #define GB_HEIGHT  200
 #define GB_TEMPORAL_NEAR 1.0f
 #define GB_TEMPORAL_FAR  8192.0f
+/* Exact indexed texel before/after COLORMAP. Material namespace follows kind:
+   wall textures, floor/ceiling flats; names are resolved by r_material.h. */
+typedef struct {
+    unsigned char source_index, ambient_index, kind, valid;
+    unsigned int material_id;
+} GB_MaterialSample;
+void GB_SetMaterialContext(int kind, unsigned int material_id);
+void GB_RecordMaterialSample(int screen_offset, unsigned char source_index,
+                            unsigned char ambient_index);
+const GB_MaterialSample *GB_MaterialSamples(void);
+void GB_SetBasePaletteRGB(const unsigned char *palette768);
+void GB_SetRawPaletteRGB(const unsigned char *palette768, const unsigned char *gamma256);
+const unsigned char *GB_BasePaletteRGB(void);
+const unsigned char *GB_RawPaletteRGB(void);
+const unsigned char *GB_GammaLUT(void);
 
 /* Coordinates are (DOOM X, height, DOOM Y), in map units.  Screen positions
  * and motion are full 320x200-buffer pixels, including the viewport offset.

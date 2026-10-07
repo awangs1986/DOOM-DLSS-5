@@ -189,6 +189,11 @@ if exist "%~dp0build-win\%CONFIG%\shaders\dxr_map.cso" (
   copy /Y "%~dp0build-win\%CONFIG%\shaders\dxr_map.cso" "%DEST%\shaders\dxr_map.cso" >nul
   if errorlevel 1 exit /b 1
 )
+if exist "%~dp0build-win\%CONFIG%\shaders\dxr_lighting.cso" (
+  if not exist "%DEST%\shaders" mkdir "%DEST%\shaders"
+  copy /Y "%~dp0build-win\%CONFIG%\shaders\dxr_lighting.cso" "%DEST%\shaders\dxr_lighting.cso" >nul
+  if errorlevel 1 exit /b 1
+)
 mkdir "%DEST%\languages" 2>nul
 copy /Y "%~dp0languages\*.ini" "%DEST%\languages\" >nul
 if errorlevel 1 exit /b 1
