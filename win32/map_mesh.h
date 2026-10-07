@@ -41,6 +41,7 @@ typedef struct {
  float legacy_normal[3], inward_normal[3];
  float x_offset, y_offset, v_anchor, texture_height;
  uint32_t triangle_count; /* may span several leaves; use triangle_surfaces */
+ uint32_t masked; /* Two-sided finite midtexture; nonopaque AS geometry. */
 } MapSurface;
 typedef struct {
  MapMeshVertex *vertices; uint32_t *indices, *triangle_surfaces;
