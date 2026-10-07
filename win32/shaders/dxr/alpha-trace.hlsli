@@ -3,13 +3,13 @@
 #include "material-sample.hlsli"
 static const uint RT_TRACE_MISS=0,RT_TRACE_HIT=1,RT_TRACE_ERROR=2,RT_TRACE_EXHAUSTED=3;
 struct RtTraceResult {
- uint status,triangle,surface,steps;
+ uint status,triangleIndex,surface,steps;
  float t;float2 uv;uint alphaChecks;
  uint rejected,lastSurface,lastAlpha,reserved;
  float2 lastUV;uint instance,geometry;
 };
 RtTraceResult TraceAccepted(RayDesc ray,RtTraceBounds bounds,bool shadow,bool opaqueDiagnostic) {
- RtTraceResult r=(RtTraceResult)0;r.triangle=r.surface=r.lastSurface=0xffffffff;
+ RtTraceResult r=(RtTraceResult)0;r.triangleIndex=r.surface=r.lastSurface=0xffffffff;
  if(!bounds.rangeCount||bounds.rangeCount>4096||bounds.descriptorCount>4096||bounds.pixelCount>16777216||
     !all(isfinite(ray.Origin))||!all(isfinite(ray.Direction))||!isfinite(ray.TMin)||!isfinite(ray.TMax)||ray.TMax<ray.TMin) {
   r.status=RT_TRACE_ERROR;return r;
@@ -42,9 +42,9 @@ RtTraceResult TraceAccepted(RayDesc ray,RtTraceBounds bounds,bool shadow,bool op
  if(!complete){query.Abort();r.status=RT_TRACE_EXHAUSTED;return r;}
  if(query.CommittedStatus()==COMMITTED_TRIANGLE_HIT) {
   r.instance=query.CommittedInstanceID();r.geometry=query.CommittedGeometryIndex();
-  r.triangle=sceneTriangleIndex(r.instance,r.geometry,query.CommittedPrimitiveIndex(),geometryRanges,bounds.rangeCount);
-  if(r.triangle>=bounds.triangleCount||!TriangleUV(r.triangle,query.CommittedTriangleBarycentrics(),bounds,r.uv)){r.status=RT_TRACE_ERROR;return r;}
-  r.surface=primitives[r.triangle].surface;r.t=query.CommittedRayT();r.status=RT_TRACE_HIT;
+  r.triangleIndex=sceneTriangleIndex(r.instance,r.geometry,query.CommittedPrimitiveIndex(),geometryRanges,bounds.rangeCount);
+  if(r.triangleIndex>=bounds.triangleCount||!TriangleUV(r.triangleIndex,query.CommittedTriangleBarycentrics(),bounds,r.uv)){r.status=RT_TRACE_ERROR;return r;}
+  r.surface=primitives[r.triangleIndex].surface;r.t=query.CommittedRayT();r.status=RT_TRACE_HIT;
  } else r.status=RT_TRACE_MISS;
  return r;
 }
