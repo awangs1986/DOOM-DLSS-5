@@ -9,9 +9,20 @@ typedef struct {
     int requested, active, available;
     const char *reason;
 } DxrLightingStatus;
+typedef struct {
+    int configured, requested, shadows;
+    float position[3], color[3], intensity, radius;
+} DxrLightingConfig;
+typedef struct {
+    void *linear_resource; /* float4[64000], NON_PIXEL_SHADER_RESOURCE, w=valid */
+    void *packed_resource; /* uint RGBA scene then nearest BGRA, COPY_SOURCE|NON_PIXEL_SHADER_RESOURCE */
+} DxrLightingSceneView;
 void DxrLighting_Init(void *device, unsigned output_width, unsigned output_height);
 void DxrLighting_RequestEnabled(int enabled);
 DxrLightingStatus DxrLighting_GetStatus(void);
+DxrLightingConfig DxrLighting_GetConfig(void);
+/* Same-frame renderer loan; expires at Prepare/config/unload. */
+const DxrLightingSceneView *DxrLighting_GetSceneView(void);
 void DxrLighting_Prepare(void);
 /* Destination scene texture must be R8G8B8A8 and COPY_DEST. */
 int DxrLighting_Evaluate(void *commands, void *scene_texture);

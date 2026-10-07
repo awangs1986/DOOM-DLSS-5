@@ -395,7 +395,7 @@ void R_DrawMaskedColumn (column_t* column)
 	    // dc_source = (byte *)column + 3 - column->topdelta;
 
 #ifdef _WIN32
-	    {
+	    if (GB_MaterialContextKind() != GB_KIND_WALL) {
 		float z;
 		int an;
 		if (spryscale <= 256)
@@ -1075,6 +1075,5 @@ void R_DrawMasked (void)
     if (!viewangleoffset)		
 	R_DrawPlayerSprites ();
 }
-
 
 
