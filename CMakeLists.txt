@@ -143,6 +143,7 @@ target_link_libraries(windoom PRIVATE
   bcrypt
   version
   advapi32
+  imm32
 )
 
 option(WINDOOM_NGX_DIAGNOSTICS "Enable explicitly labelled NGX failure injection for acceptance captures" OFF)

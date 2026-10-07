@@ -6,6 +6,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define COBJMACROS
 #include <windows.h>
+#include <imm.h>
 #include <initguid.h>
 #include <d3d12.h>
 #include <dxgi1_4.h>
@@ -1444,6 +1445,12 @@ void I_InitGraphics(void)
 			   NULL, NULL, wc.hInstance, NULL);
     if (!g_hwnd)
 	I_Error("CreateWindow failed");
+
+    /* This legacy game's input is virtual-key driven, including ASCII menu,
+       save-name and chat input. IME composition otherwise replaces ordinary
+       keydowns with VK_PROCESSKEY before WndProc sees them. Detach only this
+       owned HWND; leave the user's HKL and every other window unchanged. */
+    ImmAssociateContext(g_hwnd, NULL);
 
     init_d3d(g_hwnd);
     DxrDiag_Init(g_dev, g_queue, WIN_W, WIN_H,
