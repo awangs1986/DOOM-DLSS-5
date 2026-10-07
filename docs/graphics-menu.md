@@ -44,6 +44,8 @@ light=656 -160 -24 1 1 1 1048576 512
 
 ## 只读验收观察
 
-`-graphics-stats <new.csv>` 排他创建新观察文件并保留同一文件句柄；已有路径不覆盖。每行记录请求、实际状态／原因、reset、RT／SR 评估、实际 NGX feature、carrier 评估、消费者／checkbox／NR 执行分离字段。`-gpu-timing` 继续记录各 GPU 阶段、进程本地显存及预算。启动日志另外报告 engine、client、window、workarea 和 DPI awareness，用于区分实际窗口与截图坐标；这些日志本身不改变 DPI 行为。
+`-graphics-stats <new.csv>` 排他创建新观察文件并保留同一文件句柄；已有路径不覆盖。每行记录请求、实际状态／原因、reset、RT／SR 评估、实际 NGX feature、carrier 评估、消费者／checkbox／NR 执行分离字段。`-gpu-timing` 继续记录各 GPU 阶段、进程本地显存及预算。启动日志另外报告 engine、client、window、workarea 和 DPI awareness，用于区分实际窗口与截图坐标。
 
-实现和观察接口已落地；原生构建、真实菜单组合、重启／故障回退及窗口完整画面证据应以对应验收记录为准，不凭本说明宣称完成。
+Windows 游戏进程单独声明 per-monitor DPI awareness，按工作区调整自己的窗口；输出／shader 仍为 1280×800。较小工作区可按比例缩小 client，`WM_DPICHANGED` 会重新计算窗口。只解除游戏 HWND 的 IME composition 关联，原有虚拟键输入不改变用户 HKL 或系统输入法设置。`-input-trace` 可选记录原生键盘事件。Options 新增行及 skull 位于状态栏上方；图形文字按实际字体 patch 高度限定在 y168 前，菜单显示及关闭后的下一帧重建状态栏背景。
+
+原生构建、真实菜单组合、重启／故障回退及完整窗口证据见 [验收记录](graphics-menu-validation.md)。NR 正例与多显示器 DPI 转换仍未实测。
