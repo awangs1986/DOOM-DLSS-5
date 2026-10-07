@@ -16,7 +16,7 @@ extern "C" {
 
 enum { MAP_WALL_MID, MAP_WALL_UPPER, MAP_WALL_LOWER, MAP_FLOOR, MAP_CEILING };
 typedef struct { double x, y; } MapPoint;
-typedef struct { double floor_height, ceiling_height; int floor_material, ceiling_material; int floor_sky, ceiling_sky; } MapSector;
+typedef struct { double floor_height, ceiling_height; int floor_material, ceiling_material; int floor_sky, ceiling_sky; int32_t lightlevel; } MapSector;
 typedef struct { uint32_t sector; double x_offset, y_offset; int material[3]; double texture_height[3]; } MapSide;
 typedef struct { uint32_t vertex[2], side[2], flags; } MapLine;
 typedef struct { uint32_t vertex[2], line, side; double offset; } MapSeg;
@@ -42,6 +42,7 @@ typedef struct {
  float x_offset, y_offset, v_anchor, texture_height;
  uint32_t triangle_count; /* may span several leaves; use triangle_surfaces */
  uint32_t masked; /* Two-sided finite midtexture; nonopaque AS geometry. */
+ int32_t lightlevel; /* Current copied owner sector; never an engine pointer. */
 } MapSurface;
 typedef struct {
  MapMeshVertex *vertices; uint32_t *indices, *triangle_surfaces;
