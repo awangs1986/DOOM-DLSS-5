@@ -224,7 +224,9 @@ extern "C" int DxrReflection_Evaluate(void *commands,void *scene_texture) {
    for(unsigned c=0;c<3;c++){s.normal[c]=normal[i*4+c]==128?0:normal[i*4+c]/127.5f-1;base[i*4+c]=linear(raw[material[i].ambient_index*3+c]);}
    if(material[i].valid&&kind[i]<=GB_KIND_CEILING&&GB_SampleWorldPosition(i%320,i/320,s.position)) {
     s.flags=1;base[i*4+3]=1;unsigned flat=s.kind==GB_KIND_FLOOR||s.kind==GB_KIND_CEILING;
-    for(unsigned d=0;d<materials->descriptor_count;d++)if(materials->descriptors[d].flat_namespace==flat&&materials->descriptors[d].resolved_id==s.material){s.descriptor=d;break;}
+    // Software material context records the original sidedef/flat ID. The
+    // borrowed atlas descriptor independently resolves its current animation.
+    for(unsigned d=0;d<materials->descriptor_count;d++)if(materials->descriptors[d].flat_namespace==flat&&materials->descriptors[d].base_id==s.material){s.descriptor=d;break;}
     if(s.descriptor<state.settings.size()&&state.settings[s.descriptor].reflect&&s.kind<=GB_KIND_FLOOR)state.visible++;
    }
   }
