@@ -18,6 +18,9 @@
 ## 正在实施
 
 1. #16：已开放实施，从 `a3c699b` 创建独立工作树，实现游戏菜单 RT、SR、DLSS5／DLSSNR 三个独立请求、偏好保存、真实状态、安全切换及失败回退；SR 失败须保留已合成 RT 画面。
+   - 菜单候选已完成原版和 NGX 两种 Windows 原生构建，独立请求、profile sidecar 和可选 NR 控制仍在独立工作树，尚未合并或宣称菜单通过。
+   - 首轮真实 SendInput 菜单验收失败。观察源 `36114a8` 的按键日志证实快速成对和保持按键的字母／Enter 都变成 `VK_PROCESSKEY`，30 个窗口事件中有 11 个此类按下事件，未产生图形请求；原始失败画面和日志保留。只调整游戏自身 HWND 的 IME 关联后，需重新构建及复测，不修改系统输入法设置。
+   - 实际窗口超出 workarea 并裁剪底部 HUD；引擎导出包含完整 HUD。窗口 DPI／尺寸修复与输入修复分别验证，不能将旧截图当完整窗口通过证据。
 2. #17：干净打包、图形菜单语言键、真实键盘菜单操作、完整 RTX 组合及最终独立验收与审查。
 3. 完整规格交付后，再按用户要求调用 `gpt-6-luna` 子代理制作中文语言包及实际 CJK 显示支持。
 
@@ -30,7 +33,7 @@ DLSS5／DLSSNR 是神经渲染增强，分别于 SR、DLAA、RR 记录身份和�
 ## 保存与协调入口
 
 - 仓库：`awangs1986/DOOM-DLSS-5`；分支：`feat/dlss-rt-language-spec`。
-- 本文更新前集成 HEAD：`a3c699bdbeae3ee344572ddf56e28143e7c17238`，源码及合并记录已保存在本地。
+- 本文更新前集成 HEAD：`6d9c09ca0bdcfbaa83f17577a4275d666de4017f`，源码及合并记录已保存在本地。
 - Draft PR：https://github.com/awangs1986/DOOM-DLSS-5/pull/18 。GitHub 认证已恢复；#1／#16／#17 菜单与 NR 修订已同步。此前认证失效记录是历史状态。
 - 规格：`docs/dlss-rt-language-spec.md`；菜单任务：`docs/tasks/16-rt-sr-menu.md`、`docs/tasks/17-packaging-menu-acceptance.md`。
 - 协调与完整证据：`/home/awang/tmp/doom-implementation-g6ir9es3/`。
