@@ -213,6 +213,52 @@ static void grab_mouse(int grab)
 	ShowCursor(TRUE);
 }
 
+/* Keep renderer pixels independent of desktop DPI virtualization. These calls
+   affect only this process/owned HWND, never the user's monitor settings. */
+static void configure_window_dpi(void)
+{
+    HMODULE user = GetModuleHandleW(L"user32.dll");
+    typedef BOOL (WINAPI *ContextFn)(HANDLE);
+    ContextFn context = (ContextFn)GetProcAddress(user, "SetProcessDpiAwarenessContext");
+    if (context && context((HANDLE)(intptr_t)-4))
+        fprintf(stderr, "Graphics DPI policy: per-monitor aware v2\n");
+    else if (SetProcessDPIAware())
+        fprintf(stderr, "Graphics DPI policy: system aware fallback\n");
+    else
+        fprintf(stderr, "Graphics DPI policy: existing process policy retained\n");
+}
+static void fit_game_window(HWND window, const RECT *suggested, UINT changed_dpi)
+{
+    HMODULE user = GetModuleHandleW(L"user32.dll");
+    typedef BOOL (WINAPI *AdjustFn)(LPRECT,DWORD,BOOL,DWORD,UINT);
+    typedef UINT (WINAPI *DpiFn)(HWND);
+    AdjustFn adjust = (AdjustFn)GetProcAddress(user, "AdjustWindowRectExForDpi");
+    DpiFn get_dpi = (DpiFn)GetProcAddress(user, "GetDpiForWindow");
+    MONITORINFO monitor = {sizeof(MONITORINFO)};
+    RECT extent = {0,0,WIN_W,WIN_H}, current;
+    DWORD style = (DWORD)GetWindowLongPtrA(window,GWL_STYLE);
+    DWORD extra_style = (DWORD)GetWindowLongPtrA(window,GWL_EXSTYLE);
+    UINT dpi = changed_dpi ? changed_dpi : (get_dpi ? get_dpi(window) : 96);
+    int extra_width,extra_height,width=WIN_W,height=WIN_H,available_width,available_height,x,y;
+    HMONITOR target = suggested ? MonitorFromRect(suggested,MONITOR_DEFAULTTONEAREST) : MonitorFromWindow(window,MONITOR_DEFAULTTONEAREST);
+    if(!GetWindowRect(window,&current) || !GetMonitorInfoA(target,&monitor))return;
+    if(!adjust || !adjust(&extent,style,FALSE,extra_style,dpi))
+        AdjustWindowRectEx(&extent,style,FALSE,extra_style);
+    extra_width=extent.right-extent.left-WIN_W;
+    extra_height=extent.bottom-extent.top-WIN_H;
+    available_width=monitor.rcWork.right-monitor.rcWork.left-extra_width;
+    available_height=monitor.rcWork.bottom-monitor.rcWork.top-extra_height;
+    if(available_width<1 || available_height<1)return;
+    if(width>available_width){width=available_width;height=(int)((long long)WIN_H*width/WIN_W);}
+    if(height>available_height){height=available_height;width=(int)((long long)WIN_W*height/WIN_H);}
+    if(width<1 || height<1)return;
+    x=suggested?suggested->left:current.left;y=suggested?suggested->top:current.top;
+    if(x+width+extra_width>monitor.rcWork.right)x=monitor.rcWork.right-width-extra_width;
+    if(y+height+extra_height>monitor.rcWork.bottom)y=monitor.rcWork.bottom-height-extra_height;
+    if(x<monitor.rcWork.left)x=monitor.rcWork.left;if(y<monitor.rcWork.top)y=monitor.rcWork.top;
+    SetWindowPos(window,NULL,x,y,width+extra_width,height+extra_height,SWP_NOZORDER|SWP_NOACTIVATE);
+}
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     event_t ev;
@@ -227,6 +273,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 
     switch (msg)
     {
+      case WM_DPICHANGED:
+        fit_game_window(hwnd, (const RECT *)lparam, HIWORD(wparam));
+        return 0;
       case WM_CLOSE:
 	I_Quit();
 	return 0;
@@ -1383,6 +1432,7 @@ void I_InitGraphics(void)
     RECT rc;
     DWORD style;
 
+    configure_window_dpi();
     QueryPerformanceFrequency(&g_frame_frequency);
     g_frame_last.QuadPart = 0;
     GB_Init();
@@ -1451,6 +1501,7 @@ void I_InitGraphics(void)
        keydowns with VK_PROCESSKEY before WndProc sees them. Detach only this
        owned HWND; leave the user's HKL and every other window unchanged. */
     ImmAssociateContext(g_hwnd, NULL);
+    fit_game_window(g_hwnd, NULL, 0);
 
     init_d3d(g_hwnd);
     DxrDiag_Init(g_dev, g_queue, WIN_W, WIN_H,
