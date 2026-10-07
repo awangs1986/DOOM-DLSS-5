@@ -16,10 +16,10 @@ bool MaterialSample(uint surface,float2 uv,RtTraceBounds bounds,out uint packed,
  uint y=uint((iv%int(d.height)+int(d.height))%int(d.height));
  packed=materialPixels[d.pixelOffset+y*d.width+x];return true;
 }
-bool TriangleUV(uint triangle,float2 bary,RtTraceBounds bounds,out float2 uv) {
+bool TriangleUV(uint triangleIndex,float2 bary,RtTraceBounds bounds,out float2 uv) {
  uv=0;
- if(triangle>=bounds.triangleCount||triangle>0xffffffff/3||triangle*3>bounds.indexCount||3>bounds.indexCount-triangle*3)return false;
- uint a=indices[triangle*3],b=indices[triangle*3+1],c=indices[triangle*3+2];
+ if(triangleIndex>=bounds.triangleCount||triangleIndex>0xffffffff/3||triangleIndex*3>bounds.indexCount||3>bounds.indexCount-triangleIndex*3)return false;
+ uint a=indices[triangleIndex*3],b=indices[triangleIndex*3+1],c=indices[triangleIndex*3+2];
  if(a>=bounds.vertexCount||b>=bounds.vertexCount||c>=bounds.vertexCount||!all(isfinite(bary)))return false;
  uv=vertices[a].uv*(1-bary.x-bary.y)+vertices[b].uv*bary.x+vertices[c].uv*bary.y;
  return all(isfinite(uv));
