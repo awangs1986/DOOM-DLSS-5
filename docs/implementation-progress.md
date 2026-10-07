@@ -36,7 +36,8 @@ DLSS5／DLSSNR 是神经渲染增强，分别于 SR、DLAA、RR 记录身份和�
 
 - 仓库：`awangs1986/DOOM-DLSS-5`；分支：`feat/dlss-rt-language-spec`。
 - 本文更新前集成 HEAD：`f096136cc3efdabd1deebc5663c7f09d3860328e`，源码及合并记录已保存在本地。本次更新前的进度文档备份：`/home/awang/tmp/doom-implementation-g6ir9es3/implementation-progress-before-translation-20261007-nFFSyt.md`。
-- Draft PR：https://github.com/awangs1986/DOOM-DLSS-5/pull/18 。GitHub 认证已恢复；#1／#16／#17 菜单与 NR 修订已同步。此前认证失效记录是历史状态。
+- Draft PR：https://github.com/awangs1986/DOOM-DLSS-5/pull/18 。GitHub 认证此前曾恢复，#1／#16／#17 菜单与 NR 修订已同步；2026-10-07 本次推送返回 `Invalid username or token`，当前凭据再次失效。`gh` wrapper 的认证状态及移除 `GH_TOKEN` 后 `local/bin/gh` 的保存认证均确认 invalid；本次未登录、注销或重复推送。
+- 本次中文翻译合并 `f096136cc3efdabd1deebc5663c7f09d3860328e` 与进度记录 `e930b7ae7d230352ad8c4776a306e90cd9b29d9c` 已保存在本地，尚未推送。本次凭据失效记录更新前的进度文档备份：`/home/awang/tmp/doom-implementation-g6ir9es3/implementation-progress-before-auth-failure-20261007-VAKOlb.md`。
 - 规格：`docs/dlss-rt-language-spec.md`；菜单任务：`docs/tasks/16-rt-sr-menu.md`、`docs/tasks/17-packaging-menu-acceptance.md`。
 - 协调与完整证据：`/home/awang/tmp/doom-implementation-g6ir9es3/`。
 - 当前 #15 交付入口：`reflection-result.md`、`root-reflection-v6-all51-ledger-review.json` 及 main／extra／dynamic／source／native 独立复核；#13 交付入口：`dynamic-result.md`、`root-dynamic-matrix03-review.json`、`root-dynamic-followup-review-20261007.json`；#16／#17 准备入口：`menu-frontier-implementation-notes.md`、`existing-swapper-menu-plan.md`。
