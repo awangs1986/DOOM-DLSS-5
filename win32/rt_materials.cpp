@@ -13,6 +13,11 @@
 #include <stdexcept>
 #include "rt_materials.h"
 #include "r_material.h"
+#ifdef WINDOOM_NGX_DIAGNOSTICS
+extern "C" {
+#include "m_argv.h"
+}
+#endif
 using Microsoft::WRL::ComPtr;
 static_assert(sizeof(RtMaterialDescriptor)==32&&sizeof(RtMaterialSurface)==16,"shader material layout");
 namespace {
@@ -25,8 +30,18 @@ struct State {
     std::vector<RtMaterialSurface> surfaces;
     RtMaterialView view={};
     uint64_t signature=0,surface_signature=0,failed_signature=0;
+#ifdef WINDOOM_NGX_DIAGNOSTICS
+    bool synthetic_failure_consumed=false;
+#endif
 } state;
 ComPtr<ID3D12Resource> copied_buffer(const void *data,size_t size) {
+#ifdef WINDOOM_NGX_DIAGNOSTICS
+    if(!state.synthetic_failure_consumed&&M_CheckParm("-rt-material-fail-once")) {
+        state.synthetic_failure_consumed=true;
+        std::fprintf(stderr,"RT materials diagnostic: injected_failure=create-once (synthetic API result; not hardware failure)\n");
+        return {};
+    }
+#endif
     ComPtr<ID3D12Resource> resource;
     D3D12_HEAP_PROPERTIES heap={};heap.Type=D3D12_HEAP_TYPE_UPLOAD;
     D3D12_RESOURCE_DESC desc={};desc.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;
@@ -56,6 +71,7 @@ std::vector<RtMaterialSurface> copy_surfaces(const DxrMapSceneView *scene,const 
 }
 }
 extern "C" void RtMaterials_Init(void *device) {state.device=static_cast<ID3D12Device*>(device);}
+extern "C" void RtMaterials_RetryUnavailable(void) {state.failed_signature=0;}
 extern "C" void RtMaterials_Prepare(const DxrMapSceneView *scene) {
     if(!scene){state.view={};return;}
     if(!state.device)return;

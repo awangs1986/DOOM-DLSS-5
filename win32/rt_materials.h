@@ -26,6 +26,8 @@ typedef struct {
 } RtMaterialView;
 /* Renderer has fenced before prepare/release. Views expire at next prepare. */
 void RtMaterials_Init(void *device);
+/* Explicit off-to-on retry: forget cached failure, retain borrowed resources. */
+void RtMaterials_RetryUnavailable(void);
 void RtMaterials_Prepare(const DxrMapSceneView *scene);
 const RtMaterialView *RtMaterials_GetView(void);
 void RtMaterials_Shutdown(void);
