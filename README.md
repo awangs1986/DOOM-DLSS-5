@@ -32,7 +32,7 @@ Original game code: id Software, 1993-1996. Carmack's note: README.TXT.
 | `windoom-ngx-dlss3.5` | `--ngx-dlss3.5` | DLSS Ray Reconstruction |
 | `windoom-ngx-dlss4` | `--ngx-dlss4` | DLSS Super Resolution, preset K |
 | `windoom-ngx-dlss4.5` | `--ngx-dlss4.5` | DLSS Super Resolution, preset L |
-| `windoom-ngx-dlss5` | `--ngx-dlss5` | Same as 4.5, then DLSS 5 NR if Swapper is installed |
+| `windoom-ngx-dlss5` | `--ngx-dlss5` | SR preset L; optional DLAA carrier, external NR unverified |
 | `windoom-anime4k` | `--anime4k` | Anime4K Fast Mode C |
 | `windoom-fsr2` | `--fsr2` | AMD FSR 2.2 |
 
@@ -80,6 +80,14 @@ See [DXR diagnostic](docs/dxr-diagnostic.md) for DXC requirements and fallback.
 Real map shadows and reflections are separate work.
 
 ## DLSS 5 Swapper
+
+DLSS 5 / DLSSNR means neural rendering enhancement, a feature independently
+defined from Super Resolution (SR) and DLAA. The folder names retain the
+project's mode identities. The current native host evaluates SR and optionally
+a DLAA carrier for an external consumer; it has no verified NR control or
+execution interface. An installed or loaded Swapper/RenoDX component alone
+does not establish NR activation. See [project terminology](CONTEXT.md) and
+[`win32/README-NGX.md`](win32/README-NGX.md) for the actual paths and limitations.
 
 Point Swapper at `build-win\Release\windoom-ngx-dlss5` (not the
 Release root). DirectX 12, **Native**. Do not drop your own
