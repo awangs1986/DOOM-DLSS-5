@@ -2,6 +2,12 @@
 
 状态：2026-10-07 用户已恢复实施，完整规格尚未交付，PR18 保持 draft。历史暂停记录保留；当前协调入口为外部 `root-progress-20261007-next.md` 及其后续记录。
 
+## 2026-10-07 最新范围修订
+
+用户确认 RTX 电脑开着，要求逐步完成全部剩余工作，并明确“DLSS5不用验证了，其他继续”。保留原 DLSS5／NR 模式、独立请求及诚实的未验证状态；不再开展 NR／DLSS5 功能、consumer、checkbox 或 GPU 验证，原验收项由用户豁免而非 PASS，不再作为 #16／#17 完成阻塞。历史证据保留，SR／DLAA 仍不能替代 NR 证据。其他 RT／SR、菜单、打包、语言与真实画面验收继续，已有远端收尾／可关机记录是此前轮次状态，本次已获继续授权。
+
+中文译文已完成，实际 CJK 显示作为初始首版之外的补充扩展继续实施；`-lang zh-cn` 须实际绘制包内汉字，保持界面边界及英文像素，坏／缺字体安全回退，随包交付字体与许可资源。详见 `docs/chinese-display-task.md`；不要求完整剧情、图片菜单汉化或 Unicode 输入。当前文档修订不表示字体已实现或菜单候选已合并。
+
 ## 已完成并合入集成分支
 
 - 官方 NVIDIA DLSS SDK 固定 v310.9.1，SR DLL 文件版本 310.9.1.0；可信来源、摘要、签名与架构检查、事务部署、备份恢复、缓存修复和实际运行版本报告已完成。DLL 版本不代表 NR 已执行。
@@ -22,9 +28,9 @@
    - 菜单候选已完成原版和 NGX 两种 Windows 原生构建，独立请求、profile sidecar 和可选 NR 控制仍在独立工作树，尚未合并或宣称菜单通过。
    - 首轮真实 SendInput 菜单验收失败。观察源 `36114a8` 的按键日志证实快速成对和保持按键的字母／Enter 都变成 `VK_PROCESSKEY`，30 个窗口事件中有 11 个此类按下事件，未产生图形请求；原始失败画面和日志保留。只调整游戏自身 HWND 的 IME 关联后，需重新构建及复测，不修改系统输入法设置。
    - 实际窗口超出 workarea 并裁剪底部 HUD；引擎导出包含完整 HUD。窗口 DPI／尺寸修复与输入修复分别验证，不能将旧截图当完整窗口通过证据。
-   - 最新 owner 报告：精确源 `9c762ac` 的 13 次菜单矩阵运行均正常退出，8 个故障对照与 2 次窗口布局运行已完成；游戏 HWND 的 IME 输入修复与窗口修复已有分别取得的证据。结果已下载 Linux，Windows 测试轮次已收尾，用户可以关机；本轮不再启动远端。根代理完整复核与菜单合并仍待，当前不能标记最终 PASS；以上首轮失败日志和裁剪画面仍保留。
+   - 此前一轮 owner 报告：精确源 `9c762ac` 的 13 次菜单矩阵运行均正常退出，8 个故障对照与 2 次窗口布局运行已完成；游戏 HWND 的 IME 输入修复与窗口修复已有分别取得的证据。当时结果已下载 Linux，Windows 测试轮次已收尾，用户可以关机，该轮不再启动远端。根代理完整复核与菜单合并仍待，当前不能标记最终 PASS；以上首轮失败日志和裁剪画面仍保留。
 2. #17：干净打包、图形菜单语言键、真实键盘菜单操作、完整 RTX 组合及最终独立验收与审查。
-3. 中文语言包翻译已按用户 2026-10-07 的最新要求提前完成；CJK 字形与实际中文显示支持仍待后续。#17 首版边界不变，图形最终验收与完整规格交付仍未完成，PR18 保持 draft。
+3. 中文语言包翻译已按用户 2026-10-07 的要求提前完成；实际 CJK 显示补充任务 `docs/chinese-display-task.md` 已纳入本轮剩余工作，仍待实施与验收。#17 初始首版边界保留其历史意义，CJK 作为后续扩展交付；按最新 NR 验证豁免范围继续其他图形最终验收，完整规格交付仍未完成，PR18 保持 draft。
 
 ## 兼容与状态边界
 
@@ -32,12 +38,15 @@
 
 DLSS5／DLSSNR 是神经渲染增强，分别于 SR、DLAA、RR 记录身份和实际证据。菜单分别保存 RT／SR／NR 请求；后端组合限制以具体实现及实测为准。carrier 成功、checkbox 回读与真实 NR GPU 执行是不同证据，当前不能声称已验证 NR 执行。
 
+本轮依据用户最新修订停止 NR／DLSS5 验证，包括 consumer、checkbox 和 GPU；上述证据区分与未验证限制继续保留，豁免不转为通过结论。
+
 ## 保存与协调入口
 
 - 仓库：`awangs1986/DOOM-DLSS-5`；分支：`feat/dlss-rt-language-spec`。
 - 本文更新前集成 HEAD：`f096136cc3efdabd1deebc5663c7f09d3860328e`，源码及合并记录已保存在本地。本次更新前的进度文档备份：`/home/awang/tmp/doom-implementation-g6ir9es3/implementation-progress-before-translation-20261007-nFFSyt.md`。
 - Draft PR：https://github.com/awangs1986/DOOM-DLSS-5/pull/18 。GitHub 认证此前曾恢复，#1／#16／#17 菜单与 NR 修订已同步；2026-10-07 本次推送返回 `Invalid username or token`，当前凭据再次失效。`gh` wrapper 的认证状态及移除 `GH_TOKEN` 后 `local/bin/gh` 的保存认证均确认 invalid；本次未登录、注销或重复推送。
 - 本次中文翻译合并 `f096136cc3efdabd1deebc5663c7f09d3860328e` 与进度记录 `e930b7ae7d230352ad8c4776a306e90cd9b29d9c` 已保存在本地，尚未推送。本次凭据失效记录更新前的进度文档备份：`/home/awang/tmp/doom-implementation-g6ir9es3/implementation-progress-before-auth-failure-20261007-VAKOlb.md`。
+- 本次范围修订前 HEAD：`f107cd0d7f627742949667f5cec503d493b8fdab`；规格、#16／#17 任务及进度原文已备份到 `/home/awang/tmp/doom-implementation-g6ir9es3/docs-before-scope-revision-20261007-FvAoho/`。本次 NR 验证豁免及实际中文显示补充任务先本地保存，GitHub 凭据仍失效，待同步。
 - 规格：`docs/dlss-rt-language-spec.md`；菜单任务：`docs/tasks/16-rt-sr-menu.md`、`docs/tasks/17-packaging-menu-acceptance.md`。
 - 协调与完整证据：`/home/awang/tmp/doom-implementation-g6ir9es3/`。
 - 当前 #15 交付入口：`reflection-result.md`、`root-reflection-v6-all51-ledger-review.json` 及 main／extra／dynamic／source／native 独立复核；#13 交付入口：`dynamic-result.md`、`root-dynamic-matrix03-review.json`、`root-dynamic-followup-review-20261007.json`；#16／#17 准备入口：`menu-frontier-implementation-notes.md`、`existing-swapper-menu-plan.md`。
