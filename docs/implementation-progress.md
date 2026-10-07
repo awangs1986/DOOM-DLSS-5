@@ -13,12 +13,13 @@
 
 - #14 透明栅栏／窗洞、有限纹理范围和天空规则已合并 `60e9787`。实测源 `384c1ac` 包含 d555，37 次最终 RTX 回放正常退出；104,890 条原始 WAD alpha 采样零差异、31 组覆盖层对照零差异、关闭 RT／缺 shader 回退逐 tic 一致。最终失焦的窗口 capture 明确排除，颜色结论由 GPU readback 与同 tic 引擎 PNG 支持。详见 `docs/rt/masked-alpha-sky.md`。
 
+- #15 指定材质的屏幕外单次反射已合并 `a3c699b`。实测源 `79055b0` 的 51 次 RTX 运行正常退出；精确几何法线、原始纹理／alpha／活动调色板、动态门／平台反射命中与 SR 组合已独立核对。203 个编译输入匹配，集成非文档源码与该版本一致。实机 client 图仅作外观证据，完整窗口 HUD 布局由 #16／#17 继续验收。详见 `docs/dxr-reflection.md`。
+
 ## 正在实施
 
-1. #15：指定材质的屏幕外单次反射；真实 RTX 主矩阵及扩展场景已运行，已修正 primary 几何法线精度偏差；正在核对透明边界与动态反射证据，最终交付尚未合并。
-2. #16：前三票完成后实现游戏菜单 RT、SR、DLSS5／DLSSNR 三个独立请求、偏好保存、真实状态、安全切换及失败回退；SR 失败须保留已合成 RT 画面。
-3. #17：干净打包、图形菜单语言键、真实键盘菜单操作、完整 RTX 组合及最终独立验收与审查。
-4. 完整规格交付后，再按用户要求调用 `gpt-6-luna` 子代理制作中文语言包及实际 CJK 显示支持。
+1. #16：已开放实施，从 `a3c699b` 创建独立工作树，实现游戏菜单 RT、SR、DLSS5／DLSSNR 三个独立请求、偏好保存、真实状态、安全切换及失败回退；SR 失败须保留已合成 RT 画面。
+2. #17：干净打包、图形菜单语言键、真实键盘菜单操作、完整 RTX 组合及最终独立验收与审查。
+3. 完整规格交付后，再按用户要求调用 `gpt-6-luna` 子代理制作中文语言包及实际 CJK 显示支持。
 
 ## 兼容与状态边界
 
@@ -29,11 +30,11 @@ DLSS5／DLSSNR 是神经渲染增强，分别于 SR、DLAA、RR 记录身份和�
 ## 保存与协调入口
 
 - 仓库：`awangs1986/DOOM-DLSS-5`；分支：`feat/dlss-rt-language-spec`。
-- 本文更新前集成 HEAD：`60e9787face09ad260223ce40a5b0829b9ed1f7d`，源码及合并记录已保存在本地。
+- 本文更新前集成 HEAD：`a3c699bdbeae3ee344572ddf56e28143e7c17238`，源码及合并记录已保存在本地。
 - Draft PR：https://github.com/awangs1986/DOOM-DLSS-5/pull/18 。GitHub 认证已恢复；#1／#16／#17 菜单与 NR 修订已同步。此前认证失效记录是历史状态。
 - 规格：`docs/dlss-rt-language-spec.md`；菜单任务：`docs/tasks/16-rt-sr-menu.md`、`docs/tasks/17-packaging-menu-acceptance.md`。
 - 协调与完整证据：`/home/awang/tmp/doom-implementation-g6ir9es3/`。
-- 当前 #13 交付入口：`dynamic-result.md`、`root-dynamic-matrix03-review.json`、`root-dynamic-followup-review-20261007.json`；#16／#17 准备入口：`menu-frontier-implementation-notes.md`、`existing-swapper-menu-plan.md`。
+- 当前 #15 交付入口：`reflection-result.md`、`root-reflection-v6-all51-ledger-review.json` 及 main／extra／dynamic／source／native 独立复核；#13 交付入口：`dynamic-result.md`、`root-dynamic-matrix03-review.json`、`root-dynamic-followup-review-20261007.json`；#16／#17 准备入口：`menu-frontier-implementation-notes.md`、`existing-swapper-menu-plan.md`。
 - 任务保留至完整 PR 验收；各工作树和隔离证据未清理。
 
 ## 远程执行约束与限制
