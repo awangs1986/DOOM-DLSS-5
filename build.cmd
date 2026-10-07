@@ -211,6 +211,10 @@ for %%R in (rt-light.cfg rt-materials.cfg) do (
 mkdir "%DEST%\languages" 2>nul
 copy /Y "%~dp0languages\*.ini" "%DEST%\languages\" >nul
 if errorlevel 1 exit /b 1
+for %%R in (zh-cn.cjk FONT-OFL-1.1.txt) do (
+  copy /Y "%~dp0languages\%%R" "%DEST%\languages\%%R" >nul
+  if errorlevel 1 exit /b 1
+)
 if /I "%KIND%"=="ngx35" (
   >"%DEST%\ngx.mode" echo rr
   >"%DEST%\README.txt" echo DLSS 3.5 Ray Reconstruction. Albedo/roughness are synthesized. See win32\README-NGX.md
