@@ -145,6 +145,13 @@ struct Builder {
     wall(i,side,MAP_WALL_MID,f.floor_height,f.ceiling_height,(l.flags&MAP_FLAG_DONTPEGBOTTOM)?f.floor_height+sd.texture_height[MAP_WALL_MID]:f.ceiling_height);
    } else {
     auto b=in.sectors[in.sides[l.side[side^1]].sector];
+    if(sd.material[MAP_WALL_MID]>0 && sd.texture_height[MAP_WALL_MID]>0) {
+     double bottom=std::max(f.floor_height,b.floor_height),top=std::min(f.ceiling_height,b.ceiling_height);
+     double anchor=(l.flags&MAP_FLAG_DONTPEGBOTTOM)?bottom+sd.texture_height[MAP_WALL_MID]:top;
+     wall(i,side,MAP_WALL_MID,bottom,top,anchor);
+     auto &mid=surfaces[MapMesh_WallSurface(i,side,MAP_WALL_MID)];
+     if(mid.active)mid.masked=1;
+    }
     if(!(f.ceiling_sky&&b.ceiling_sky)&&b.ceiling_height<f.ceiling_height)
      wall(i,side,MAP_WALL_UPPER,std::max(f.floor_height,b.ceiling_height),f.ceiling_height,(l.flags&MAP_FLAG_DONTPEGTOP)?f.ceiling_height:b.ceiling_height+sd.texture_height[MAP_WALL_UPPER]);
     if(b.floor_height>f.floor_height)

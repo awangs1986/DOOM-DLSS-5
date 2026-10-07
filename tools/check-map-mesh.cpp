@@ -25,6 +25,8 @@ Fixture rectangle(){Fixture f;for(auto p:std::vector<MapPoint>{{0,0},{0,4},{8,4}
 Fixture adjacent(){Fixture f;f.sectors.push_back({0,8,3,4,0,0});for(auto p:std::vector<MapPoint>{{0,0},{0,4},{4,4},{8,4},{8,0},{4,0}})f.point(p.x,p.y);
  f.line(0,1,0);f.line(1,2,0);f.line(2,3,1);f.line(3,4,1);f.line(4,5,1);f.line(5,0,0);
  auto shared=f.line(5,2,1);f.lines[shared].side[1]=f.side(0);f.lines[shared].flags=MAP_FLAG_TWOSIDED;
+ f.sides[f.lines[shared].side[0]].material[MAP_WALL_MID]=0;
+ f.sides[f.lines[shared].side[1]].material[MAP_WALL_MID]=0;
  f.seg(0);f.seg(1);f.seg(shared,1);f.seg(5);f.leaf(0,4,0);
  f.seg(shared);f.seg(2);f.seg(3);f.seg(4);f.leaf(4,4,1);
  f.nodes.push_back({4,0,0,1,{MAP_CHILD_LEAF|1,MAP_CHILD_LEAF|0}});return f;
@@ -50,6 +52,17 @@ int main(){try {
   m=build(f);auto lower=m.surfaces[MapMesh_WallSurface(6,1,MAP_WALL_LOWER)],upper=m.surfaces[MapMesh_WallSurface(6,1,MAP_WALL_UPPER)];check(lower.triangle_count==2&&upper.triangle_count==2&&lower.v_anchor==5&&upper.v_anchor==41&&upper.texture_height==32&&lower.texture_height==16,"height steps and default pegging");check(lower.side==side&&lower.sector==0&&lower.back_sector==1&&lower.base_material==12&&lower.legacy_normal[0]==1&&lower.inward_normal[0]==-1,"stable side/material/normal metadata");MapMesh_Free(&m);
   f.lines[6].flags|=MAP_FLAG_DONTPEGBOTTOM|MAP_FLAG_DONTPEGTOP;m=build(f);check(m.surfaces[MapMesh_WallSurface(6,1,MAP_WALL_LOWER)].v_anchor==11&&m.surfaces[MapMesh_WallSurface(6,1,MAP_WALL_UPPER)].v_anchor==11,"flag pegging anchors");MapMesh_Free(&m);
   f.sectors[0].ceiling_sky=f.sectors[1].ceiling_sky=1;m=build(f);check(!m.surfaces[MapMesh_WallSurface(6,1,MAP_WALL_UPPER)].active&&area(m,MAP_CEILING)==0,"sky portal/planes do not occlude");MapMesh_Free(&m);std::puts("PASS adjacency portal/height steps/UV pegging/sky/normal contracts");}
+ {auto f=adjacent();auto side0=f.lines[6].side[0],side1=f.lines[6].side[1];f.sides[side0].material[MAP_WALL_MID]=10;f.sides[side1].material[MAP_WALL_MID]=11;
+  f.sides[side0].x_offset=-5;f.sides[side0].y_offset=3;f.sides[side0].texture_height[MAP_WALL_MID]=2;
+  f.sides[side1].x_offset=7;f.sides[side1].y_offset=-1;f.sides[side1].texture_height[MAP_WALL_MID]=4;
+  auto m=build(f);auto mid0=m.surfaces[MapMesh_WallSurface(6,0,MAP_WALL_MID)],mid1=m.surfaces[MapMesh_WallSurface(6,1,MAP_WALL_MID)];
+  check(mid0.active&&mid1.active&&mid0.masked&&mid1.masked&&mid0.triangle_count==2&&mid1.triangle_count==2,"masked opening has each stable side slot");
+  check(mid0.v_anchor==11&&mid1.v_anchor==7&&mid0.x_offset==-5&&mid1.x_offset==7,"masked ceiling peg and side offsets");
+  check(mid0.inward_normal[0]==1&&mid1.inward_normal[0]==-1,"masked physical side normals");
+  for(size_t i=0;i<m.triangle_count;i++)if(m.triangle_surfaces[i]==MapMesh_WallSurface(6,0,MAP_WALL_MID))for(unsigned c=0;c<3;c++){
+   const auto &v=m.vertices[m.indices[i*3+c]];check(v.position[1]>=0&&v.position[1]<=8&&v.uv[0]>=-5&&v.uv[0]<=-1&&v.uv[1]==11-v.position[1],"masked full opening finite UV, no vertical tiled geometry");}
+  MapMesh_Free(&m);f.lines[6].flags|=MAP_FLAG_DONTPEGBOTTOM;m=build(f);check(m.surfaces[MapMesh_WallSurface(6,0,MAP_WALL_MID)].v_anchor==5&&m.surfaces[MapMesh_WallSurface(6,1,MAP_WALL_MID)].v_anchor==3,"masked bottom peg uses each resolved texture height");MapMesh_Free(&m);
+  f.sectors[1].floor_height=f.sectors[1].ceiling_height=4;m=build(f);check(!m.surfaces[MapMesh_WallSurface(6,0,MAP_WALL_MID)].active&&!m.surfaces[MapMesh_WallSurface(6,1,MAP_WALL_MID)].active,"closed opening contains no masked mid");MapMesh_Free(&m);std::puts("PASS masked finite opening, side identity/UV/offsets/pegging/closed portal");}
  {auto f=rectangle();f.segs.push_back({{0,0},0,0,0});f.leaves[0].seg_count++;auto m=build(f);check(area(m,MAP_FLOOR)==32,"zero seg ignored without corrupting area");MapMesh_Free(&m);
   auto input=f.input();f.segs[0].vertex[0]=999;char error[128];check(!MapMesh_Build(&input,&m,error,sizeof(error))&&m.vertices==nullptr&&error[0],"bad index rejection");f.segs[0].vertex[0]=0;
   f.nodes.push_back({4,0,0,1,{0,MAP_CHILD_LEAF}});input=f.input();check(!MapMesh_Build(&input,&m,error,sizeof(error))&&m.vertices==nullptr,"BSP cycle rejection");f.nodes[0].child[0]=MAP_CHILD_LEAF|77;input=f.input();check(!MapMesh_Build(&input,&m,error,sizeof(error)),"invalid child rejection");f.nodes.clear();f.leaves[0].first_seg=999;input=f.input();check(!MapMesh_Build(&input,&m,error,sizeof(error)),"malformed leaf range rejection");f.leaves[0].first_seg=0;f.points[0].x=std::numeric_limits<double>::quiet_NaN();input=f.input();check(!MapMesh_Build(&input,&m,error,sizeof(error)),"nonfinite point rejection");std::puts("PASS zero edge / malformed range / cyclic BSP / invalid child / nonfinite guards");}
