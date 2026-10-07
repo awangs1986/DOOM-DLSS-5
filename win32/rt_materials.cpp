@@ -36,7 +36,8 @@ struct State {
 } state;
 ComPtr<ID3D12Resource> copied_buffer(const void *data,size_t size) {
 #ifdef WINDOOM_NGX_DIAGNOSTICS
-    if(!state.synthetic_failure_consumed&&M_CheckParm("-rt-material-fail-once")) {
+    char fault_flag[]="-rt-material-fail-once";
+    if(!state.synthetic_failure_consumed&&M_CheckParm(fault_flag)) {
         state.synthetic_failure_consumed=true;
         std::fprintf(stderr,"RT materials diagnostic: injected_failure=create-once (synthetic API result; not hardware failure)\n");
         return {};

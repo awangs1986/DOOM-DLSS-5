@@ -52,6 +52,10 @@ driver=r'''
 #include <d3d12.h>
 #include <cassert>
 #include <cstdio>
+#ifdef WINDOOM_NGX_DIAGNOSTICS
+static bool inject_enabled=false;
+extern "C" int M_CheckParm(char*){return inject_enabled?1:0;}
+#endif
 extern "C" int R_ResolveTexture(unsigned id,unsigned*out){*out=id;return 1;}
 extern "C" int R_ResolveFlat(unsigned id,unsigned*out){*out=id;return 1;}
 extern "C" int R_DescribeTexture(unsigned id,R_MaterialDescription*out){*out={id,1,1,0,{0}};return 1;}
@@ -79,10 +83,17 @@ int main(){
   RtMaterials_RetryUnavailable();RtMaterials_Prepare(&scene);assert(RtMaterials_GetView());assert(live_resources==3);
   RtMaterials_Shutdown();assert(live_resources==0);surface.lightlevel=160;scene.shading_revision=0;
  }
+#ifdef WINDOOM_NGX_DIAGNOSTICS
+ inject_enabled=true;RtMaterials_Init(&device);RtMaterials_Prepare(&scene);assert(!RtMaterials_GetView()&&live_resources==0);
+ int attempted=allocations;RtMaterials_Prepare(&scene);assert(allocations==attempted);
+ RtMaterials_Init(&device);RtMaterials_RetryUnavailable();RtMaterials_Prepare(&scene);assert(RtMaterials_GetView()&&live_resources==3);
+ RtMaterials_Shutdown();assert(live_resources==0);
+#endif
  std::puts("PASS: create/map failure suppressed until explicit retry; healthy views retained; resources retired safely");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='rt-materials-retry-') as temp:
  p=Path(temp);(p/'wrl').mkdir();(p/'windows.h').write_text(windows);(p/'d3d12.h').write_text(d3d);(p/'wrl/client.h').write_text(wrl);(p/'driver.cpp').write_text(driver)
- subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(p),'-I'+str(root/'win32'),'-I'+str(root/'linuxdoom-1.10'),str(root/'win32/rt_materials.cpp'),str(p/'driver.cpp'),'-o',str(p/'retry')],check=True)
- subprocess.run([str(p/'retry')],check=True)
+ for diagnostic in ([],['-DWINDOOM_NGX_DIAGNOSTICS']):
+  subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(p),'-I'+str(root/'win32'),'-I'+str(root/'linuxdoom-1.10'),str(root/'win32/rt_materials.cpp'),str(p/'driver.cpp'),'-o',str(p/'retry')]+diagnostic,check=True)
+  subprocess.run([str(p/'retry')],check=True)
