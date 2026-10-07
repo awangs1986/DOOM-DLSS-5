@@ -1,6 +1,17 @@
 # 实施进度与续做入口
 
-状态：2026-10-07 用户已恢复实施，完整规格尚未交付，PR18 保持 draft。历史暂停记录保留；当前协调入口为外部 `root-progress-20261007-next.md` 及其后续记录。
+状态：2026-10-07 已完成用户修订后的非 NR 实施、实际中文扩展及最终实机验收；最终运行源码为 `4fed93cb60e0cda102b0f67edfc7733e4c6fe77c`。七目录离线交付与准确源码、许可及摘要见最终验收记录。GitHub 凭据失效，当前提交仍仅本地保存，PR18 远端保持 draft，同步及远端 ready 状态尚未完成。NR 为用户豁免的未验证项。以下历史记录及红例保留，最新结论优先。
+
+## 最终接受记录（2026-10-07，v6）
+
+- fresh `build.cmd --all`：330 个 Git／archive／manifest／实际源输入一致，四次原生编译／链接，七目录 105 个部署文件；每目录带中文字体／OFL 与五个 DXR shader，五 DLL 当前签名 Valid、AMD64、310.9.1.0。2020 条既有 warnings，零 errors。
+- v6 六非 NR 默认模式：6 个进程 exit 0、72 个 pairs／144 个 WM／42 张 capture；同静止 east-A fixture 的 tic70／175 十二张 PNG 字节与 RGB 与历史797源完全一致，不冒称 `-playdemo`。
+- v6 实际 en／es／zh 消费者和缺／坏字体／长提示：6 个进程 exit 0、168 pairs＋3 holds／342 个匹配 WM／75 张 capture／6 次正常读档 reset；亮色中文 pickup、Options、RT＋SR、MY SAVE／F6／F9／退出、2＋2 行长理由与保存失败均实际可读，缺／坏字体整体英文。HUD 脸部／窗口圆角外差异 0。
+- v6 实际 gamma／缩小视口 HUD 清除：3 进程 exit 0、39 pairs／78 WM／21 张 capture；F8 后等待至少300新帧再 F11，确认为 gamma1；顶部48行消息过期后的残字差异0，包含完整12px中文高度。
+- 历史精确00e源最终 v5 held／replay 经根独立复核：门 Use、正常存读档、暂停、RT off 改世界再 on、MAP01→MAP02→MAP01，十条动态／透明／天空／屏外／传送回放；独立原 WAD alpha28,526检查0差异。v6 只改变中文墨色，原几何／RT源相同，旧 GPU 运行仍标 v5。
+- Standards 0 硬性违反（此前3个非阻塞维护建议），Spec 0 已确认未解决源码缺陷，Security0 已确立可利用问题且保留审计范围限制。最终三轴增量与运行分别核验。
+- v4字体staging遗漏、v5暗色CJK、旧gamma被F8消息遮盖、v6首次SearchHost焦点阻塞、最初pair-only世界试跑全部保留并排除对应通过结论。最终 owned tasks 精确移除，游戏正常退出，不动用户应用／系统设置。
+- [最终验收矩阵](packaging-acceptance.md)覆盖故事1–51及#16／#17／中文扩展，NR-only行明确 WAIVED。七目录、准确源码ZIP、许可、关键帧、版本与SHA-256交付；无IWAD／TTC。GitHub本轮同步及PR18远端ready仍待凭据恢复，本地实现和运行不因此回退为未完成。
 
 ## 2026-10-07 最新范围修订
 
@@ -54,7 +65,7 @@
 
 三个审查方向已固定 `00e0d5a6`：Standards 0 硬性违反、3 项无实际缺陷的维护建议；Spec 原 P2 已修，0 已确认未解决源码问题；Security 五类检查未发现可证实的可利用问题。报告位于协调目录 `final-standards-review-00e0d5a.md`、`final-spec-review-00e0d5a.md`、`final-security-review-f333560.md`（正文固定最新源）。安全结论限定源码和本地依赖一致性，未查询漏洞公告，不是完整安全审计；三份报告均不替代最终运行验收。
 
-## 正在实施
+## 最终 v6 前的实施计划（历史，已完成）
 
 1. #17 owner 独占 RTX 桌面，使用已通过 fresh 构建的精确 runtime 源 `00e0d5a6`，实际启动六个非 DLSS5 模式；检查英文相同 demo 的 12 张逐像素对照及实际菜单恢复。
 2. 真实键盘中文／西语消费者、缺／坏字体整体回退、长理由与偏好 warning、同进程存读档／换关／传送、RT off 改世界再 on，以及动态／alpha／sky／屏外反射关键帧仍待最终集成实测。DLSS5／NR 验证继续按用户豁免执行。
