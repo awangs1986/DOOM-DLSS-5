@@ -2,6 +2,7 @@
 #ifndef WINDOOM_LANGUAGE_H
 #define WINDOOM_LANGUAGE_H
 #include <stddef.h>
+#include <stdint.h>
 #define LANG_MAX_FILE 65536
 #define LANG_MAX_VALUE 2048
 #define LANG_MAX_ENTRIES 256
@@ -34,4 +35,9 @@ void Lang_InitGame(void);
 /* Original font: space, ! through _, and letters; one '?' per unsupported UTF-8 code point.
  * Wrap/truncate by columns and lines, never split UTF-8 in the source. */
 void Lang_MenuText(const char *src, char *dst, size_t capacity, size_t columns, size_t lines);
+/* Strict UTF-8 iterator: 1=codepoint, 0=end, -1=invalid byte (consumed). */
+int Lang_DecodeUtf8(const char **src, uint32_t *codepoint);
+/* CJK bitmap glyphs are 12x12, row-major, MSB-first 1bpp. */
+int Lang_CjkGlyph(uint32_t codepoint, const unsigned char **mask);
+int Lang_CjkFontReady(void);
 #endif
