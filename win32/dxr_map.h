@@ -1,4 +1,5 @@
-/* One scene owner. Loaned views expire at unload; renderer fences before access.
+/* One scene owner. Loaned scene/surface views expire at next Prepare or unload;
+   renderer fences before access.
    No engine map pointers. GPLv2. */
 #ifndef WINDOOM_DXR_MAP_H
 #define WINDOOM_DXR_MAP_H
@@ -31,7 +32,7 @@ void DxrMap_Unload(void); /* waits own shared-queue fence before level data free
 void DxrMap_LevelLoaded(const char *name);
 void DxrMap_Shutdown(void);
 const DxrMapSceneView *DxrMap_GetScene(void);
-/* Geometry0 uses mesh triangle order; future descriptors need an explicit map. */
+/* Borrowed current surface, mapped through the canonical tuple range table. */
 const MapSurface *DxrMap_GetSurface(unsigned instance_id, unsigned geometry_index, unsigned primitive_index);
 #ifdef __cplusplus
 }
