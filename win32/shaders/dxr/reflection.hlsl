@@ -28,6 +28,7 @@ struct Result {
  uint sourceIndex,ambientIndex,original,finalColor;
  uint alphaChecks,rejected,instance,geometry;
  float3 hitNormal;uint reserved;
+ float2 candidateUV;uint candidateSurface,candidateAlpha;
 };
 RWStructuredBuffer<Result> results : register(u1);
 cbuffer Frame : register(b0) {
@@ -59,6 +60,7 @@ void trace(uint3 thread:SV_DispatchThreadID) {
   RayDesc ray;ray.Origin=s.position+n*0.03125;ray.Direction=normalize(reflect(incident,n));ray.TMin=0.03125;ray.TMax=8192;
   RtTraceResult hit=TraceAccepted(ray,bounds,false,false);
   r.flags|=2;r.status=hit.status;r.steps=hit.steps;r.alphaChecks=hit.alphaChecks;r.rejected=hit.rejected;
+  r.candidateUV=hit.lastUV;r.candidateSurface=hit.lastSurface;r.candidateAlpha=hit.lastAlpha;
   r.hitT=hit.t;r.surface=hit.surface;r.triangleIndex=hit.triangleIndex;r.uv=hit.uv;r.instance=hit.instance;r.geometry=hit.geometry;
   float3 radiance=0;
   if(hit.status==RT_TRACE_MISS) {radiance=environment;r.flags|=8;}
