@@ -62,7 +62,7 @@ enum {
     GB_RESET_INITIAL = 1, GB_RESET_SCENE = 2, GB_RESET_VIEW = 4,
     GB_RESET_TELEPORT = 8, GB_RESET_LOAD = 16, GB_RESET_LEVEL = 32,
     GB_RESET_MENU = 64, GB_RESET_PAUSE = 128, GB_RESET_CAMERA_CUT = 256,
-    GB_RESET_EXPLICIT = 512, GB_RESET_GEOMETRY = 1024, GB_RESET_SHADING = 2048
+    GB_RESET_EXPLICIT = 512, GB_RESET_GEOMETRY = 1024, GB_RESET_SHADING = 2048, GB_RESET_REFLECTION = 4096
 };
 typedef struct {
     unsigned int frame_id;
@@ -132,6 +132,11 @@ const unsigned char *GB_OverlayMask(void);
 const float         *GB_Depth(void);
 const float         *GB_TemporalDepth(void);
 const unsigned char *GB_NormalRGBA(void);
+/* Float3 physical inward normals from the current scene capture. Wall normals
+ * come from the current directed seg; planes use their exact axis normal.
+ * Valid only where material/scene capture is valid; overlays never replace it. */
+const float *GB_GeometricNormalXYZ(void);
+void GB_SetColumnGeometricNormal(float nx,float ny,float nz);
 const float         *GB_VelocityRG(void);
 
 void GB_ComposePresent(unsigned char *dst_bgra, int dst_w, int dst_h);

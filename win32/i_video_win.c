@@ -33,6 +33,7 @@
 #include "dxr_diagnostic.h"
 #include "dxr_map.h"
 #include "dxr_lighting.h"
+#include "dxr_reflection.h"
 #include "render_adapter.h"
 #include "frame_trace.h"
 
@@ -967,6 +968,7 @@ void I_FinishUpdate(void)
     int used_a4k = 0;
     int used_fsr2 = 0;
     int used_rt = 0;
+    int used_reflection = 0;
     int reset;
 
     {
@@ -989,6 +991,7 @@ void I_FinishUpdate(void)
     DxrDiag_Prepare();
     DxrMap_Prepare();
     DxrLighting_Prepare();
+    DxrReflection_Prepare();
     idx = IDXGISwapChain3_GetCurrentBackBufferIndex(g_swap);
     ID3D12CommandAllocator_Reset(g_alloc);
     ID3D12GraphicsCommandList_Reset(g_cmd, g_alloc, NULL);
@@ -1018,6 +1021,13 @@ void I_FinishUpdate(void)
     GpuTiming_Mark(g_cmd, 1);
     used_rt = DxrLighting_Evaluate(g_cmd, g_tex_color);
     GpuTiming_LightingEnd(g_cmd);
+    used_reflection = DxrReflection_Evaluate(g_cmd, g_tex_color);
+    if (!used_reflection) GpuTiming_ReflectionTraceEnd(g_cmd);
+    GpuTiming_ReflectionEnd(g_cmd);
+    if (DxrReflection_NeedsHistoryReset()) {
+        reset = 1;
+        GB_RequestResetReason(GB_RESET_REFLECTION);
+    }
     if (Ngx_Ready() && Ngx_ShowEvalOutput() &&
 	GB_GetDebugView() == GB_VIEW_COLOR &&
 	GB_HasScenePixels())
@@ -1108,6 +1118,7 @@ void I_FinishUpdate(void)
 	used_a4k = Anime4K_Evaluate(g_cmd, g_tex_color, g_tex_out);
     }
 
+    DxrReflection_RecordTemporalEvaluation(reset, used_ngx, used_fsr2);
     Ngx_RecordPresented(used_ngx, used_fsr2 ? "fsr2" :
                         (used_a4k ? "anime4k-fast" : "nearest"));
 
@@ -1123,10 +1134,11 @@ void I_FinishUpdate(void)
          * scene depth or palette difference to classify their visibility. */
         overlay_hud_on_bb(g_bb[idx]);
     }
-    else if (used_rt)
+    else if (used_rt || used_reflection)
     {
         barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_COPY_DEST);
-        DxrLighting_PresentNearest(g_cmd, g_bb[idx]);
+        if (used_reflection) DxrReflection_PresentNearest(g_cmd, g_bb[idx]);
+        else DxrLighting_PresentNearest(g_cmd, g_bb[idx]);
         overlay_hud_on_bb(g_bb[idx]);
     }
     else
@@ -1196,6 +1208,7 @@ void I_ShutdownGraphics(void)
     GpuTiming_Collect();
     GpuTiming_Shutdown();
     DxrDiag_Shutdown();
+    DxrReflection_Shutdown();
     DxrLighting_Shutdown();
     DxrMap_Shutdown();
     Png_Shutdown();
@@ -1327,6 +1340,7 @@ void I_InitGraphics(void)
     DxrMap_Init(g_dev, g_queue, WIN_W, WIN_H,
                 M_CheckParm("-rt-map-normal") ? 2 : (M_CheckParm("-rt-map-depth") ? 1 : 0), M_CheckParm("-nort") != 0);
     DxrLighting_Init(g_dev, WIN_W, WIN_H);
+    DxrReflection_Init(g_dev, WIN_W, WIN_H);
     if (Ngx_Wanted())
 	Ngx_Init(g_dev, g_queue);
     else

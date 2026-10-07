@@ -194,6 +194,13 @@ if exist "%~dp0build-win\%CONFIG%\shaders\dxr_lighting.cso" (
   copy /Y "%~dp0build-win\%CONFIG%\shaders\dxr_lighting.cso" "%DEST%\shaders\dxr_lighting.cso" >nul
   if errorlevel 1 exit /b 1
 )
+for %%S in (dxr_reflection_trace dxr_reflection_compose) do (
+  if exist "%~dp0build-win\%CONFIG%\shaders\%%S.cso" (
+    if not exist "%DEST%\shaders" mkdir "%DEST%\shaders"
+    copy /Y "%~dp0build-win\%CONFIG%\shaders\%%S.cso" "%DEST%\shaders\%%S.cso" >nul
+    if errorlevel 1 exit /b 1
+  )
+)
 mkdir "%DEST%\languages" 2>nul
 copy /Y "%~dp0languages\*.ini" "%DEST%\languages\" >nul
 if errorlevel 1 exit /b 1

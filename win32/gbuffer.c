@@ -26,6 +26,7 @@ static int gb_last_scene;
 static float         gb_depth[GB_PIX];
 static float         gb_temporal_depth[GB_PIX];
 static unsigned char gb_normal[GB_PIX * 4];
+static float gb_geometric_normal[GB_PIX * 3];
 static float         gb_velocity[GB_PIX * 2];
 static float         gb_obj_du[GB_PIX];
 static float         gb_obj_dv[GB_PIX];
@@ -37,6 +38,8 @@ static unsigned int gb_material_id;
 
 static float gb_col_z;
 static float gb_col_nx, gb_col_ny, gb_col_nz;
+static float gb_col_geometric_normal[3];
+static int gb_col_geometric_normal_valid;
 static float gb_col_du, gb_col_dv;
 static int   gb_col_x = -1;
 static int   gb_debug_view = GB_VIEW_COLOR;
@@ -57,6 +60,7 @@ static void gb_clear_aux(void)
     memset(gb_surface_kind, GB_KIND_SKY, sizeof(gb_surface_kind));
     memset(gb_depth, 0, sizeof(gb_depth));
     memset(gb_normal, 0, sizeof(gb_normal));
+    memset(gb_geometric_normal, 0, sizeof(gb_geometric_normal));
     memset(gb_velocity, 0, sizeof(gb_velocity));
     memset(gb_obj_du, 0, sizeof(gb_obj_du));
     memset(gb_obj_dv, 0, sizeof(gb_obj_dv));
@@ -139,8 +143,17 @@ void GB_SetColumn(int x, float z, float nx, float ny, float nz, int kind)
     gb_col_nx = nx;
     gb_col_ny = ny;
     gb_col_nz = nz;
+    gb_col_geometric_normal_valid = 0;
     gb_col_du = 0.0f;
     gb_col_dv = 0.0f;
+}
+
+void GB_SetColumnGeometricNormal(float nx, float ny, float nz)
+{
+    gb_col_geometric_normal[0] = nx;
+    gb_col_geometric_normal[1] = ny;
+    gb_col_geometric_normal[2] = nz;
+    gb_col_geometric_normal_valid = isfinite(nx) && isfinite(ny) && isfinite(nz);
 }
 
 void GB_SetObjectMotion(float du, float dv)
@@ -208,6 +221,13 @@ static void gb_write_pixel(int x, int y, float z, float nx, float ny, float nz)
     gb_normal[i * 4 + 1] = (unsigned char)g;
     gb_normal[i * 4 + 2] = (unsigned char)b;
     gb_normal[i * 4 + 3] = 255;
+    if (gb_col_kind == GB_KIND_WALL && gb_col_geometric_normal_valid) {
+        memcpy(gb_geometric_normal + i * 3, gb_col_geometric_normal, sizeof(gb_col_geometric_normal));
+    } else {
+        gb_geometric_normal[i * 3] = nx;
+        gb_geometric_normal[i * 3 + 1] = ny;
+        gb_geometric_normal[i * 3 + 2] = nz;
+    }
 }
 
 void GB_WriteColumn(int x, int yl, int yh)
@@ -523,6 +543,7 @@ const unsigned char *GB_NormalRGBA(void)
 {
     return gb_normal;
 }
+const float *GB_GeometricNormalXYZ(void) { return gb_geometric_normal; }
 
 const float *GB_VelocityRG(void)
 {

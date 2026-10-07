@@ -84,6 +84,8 @@ add_executable(windoom
   win32/dxr_diagnostic.cpp
   win32/dxr_map.cpp
   win32/dxr_lighting.cpp
+  win32/dxr_reflection.cpp
+  win32/reflection_config.c
   win32/rt_materials.cpp
   win32/map_mesh.cpp
   win32/map_source.c
@@ -270,6 +272,18 @@ if(WINDOOM_DXR)
         win32/shaders/dxr/alpha-trace.hlsli VERBATIM)
     add_custom_target(windoom_light_shader DEPENDS "${_wd_light_shader}")
     add_dependencies(windoom windoom_light_shader)
+    foreach(_wd_reflection_entry trace compose)
+      set(_wd_reflection_shader "${_wd_runtime_dir}/shaders/dxr_reflection_${_wd_reflection_entry}.cso")
+      add_custom_command(OUTPUT "${_wd_reflection_shader}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_wd_runtime_dir}/shaders"
+        COMMAND "${DXC_EXECUTABLE}" -T cs_6_5 -E "${_wd_reflection_entry}" -O3
+          -Fo "${_wd_reflection_shader}" "${CMAKE_CURRENT_SOURCE_DIR}/win32/shaders/dxr/reflection.hlsl"
+        DEPENDS win32/shaders/dxr/reflection.hlsl win32/shaders/dxr/scene-hit.hlsli
+          win32/shaders/dxr/alpha-trace.hlsli win32/shaders/dxr/material-sample.hlsli
+          win32/shaders/dxr/rt-material-layout.hlsli VERBATIM)
+      add_custom_target(windoom_reflection_${_wd_reflection_entry}_shader DEPENDS "${_wd_reflection_shader}")
+      add_dependencies(windoom windoom_reflection_${_wd_reflection_entry}_shader)
+    endforeach()
     message(STATUS "DXR diagnostic DXC: ${DXC_EXECUTABLE}")
   else()
     message(STATUS "DXC absent; normal rendering works, DXR diagnostic shader unavailable")
