@@ -79,6 +79,7 @@ set(DOOM_SOURCES
 add_executable(windoom
   ${DOOM_SOURCES}
   win32/graphics_settings.c
+  win32/nr_control.cpp
   win32/frame_inputs.c
   win32/frame_trace.c
   win32/gbuffer.c
@@ -128,6 +129,7 @@ if(MSVC)
     /wd4101
     /FIstrings.h
     /FIalloca.h
+    $<$<COMPILE_LANGUAGE:CXX>:/EHsc>
   )
 endif()
 
@@ -140,6 +142,7 @@ target_link_libraries(windoom PRIVATE
   windowscodecs
   bcrypt
   version
+  advapi32
 )
 
 option(WINDOOM_NGX_DIAGNOSTICS "Enable explicitly labelled NGX failure injection for acceptance captures" OFF)
