@@ -986,8 +986,9 @@ static void record_graphics(int light,int reflection,int ngx,int reset) {
  else Graphics_SetActual(GRAPHICS_SR,GRAPHICS_PAUSED,"graphics.reason.non_scene");
  nr=Graphics_Get(GRAPHICS_NR);
  if(!control.loaded)Graphics_SetActual(GRAPHICS_NR,nr.requested?GRAPHICS_UNAVAILABLE:GRAPHICS_OFF,nr.requested?"graphics.reason.backend_missing":"graphics.reason.off");
+ else if(control.pending)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_PENDING,control.reason);
  else if(!control.supported)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_UNKNOWN,control.reason);
- else if(control.pending||control.confirmed!=nr.requested)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_PENDING,control.reason);
+ else if(control.confirmed!=nr.requested)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_UNKNOWN,"graphics.reason.confirmation_failed");
  else if(!nr.requested)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_OFF,"graphics.reason.off");
  else if(control.execution_verified)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_ACTIVE,"graphics.reason.none");
  else Graphics_SetActual(GRAPHICS_NR,GRAPHICS_UNVERIFIED,!sr.requested?"graphics.reason.no_input":(strcmp(n.carrier_reason,"none")?(!strcmp(n.carrier_reason,"hires-allocation-failed")?"graphics.reason.hires":"graphics.reason.carrier"):"graphics.reason.execution_unverified"));
