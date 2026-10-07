@@ -13,6 +13,7 @@
 #include <vector>
 #include <exception>
 #include "dxr_lighting.h"
+#include "graphics_settings.h"
 #include "dxr_map.h"
 #include "gbuffer.h"
 #include "rt_materials.h"
@@ -166,8 +167,13 @@ extern "C" void DxrLighting_Init(void *device,unsigned width,unsigned height) {
         if(valid){state.constants.position[0]=values[0];state.constants.position[1]=values[2];state.constants.position[2]=values[1];std::memcpy(state.constants.color,values+3,12);state.constants.intensity=values[6];state.constants.radius=values[7];state.configured=true;}
         else std::fprintf(stderr,"RT point light: invalid -rt-light; expected DOOM x y height, linear RGB[0,1], intensity[0,1e8], radius(0.0625,8192]; original rendering retained\n");
     }
+    if(!arg) {float values[8];if(Graphics_ReadDefaultLight(values)) {
+        state.constants.position[0]=values[0];state.constants.position[1]=values[2];state.constants.position[2]=values[1];
+        std::memcpy(state.constants.color,values+3,12);state.constants.intensity=values[6];state.constants.radius=values[7];state.configured=true;
+        std::fprintf(stderr,"RT default light: configured from executable resource, request unchanged\n");
+    }}
     if(width!=1280||height!=800){state.reason="unsupported-output-size";state.failed=true;}
-    state.requested=state.configured&&!M_CheckParm("-nort")&&!M_CheckParm("-rt-light-off");
+    state.requested=arg&&state.configured&&!M_CheckParm("-nort")&&!M_CheckParm("-rt-light-off");
     state.reason=state.configured?(state.requested?"pending-scene":"disabled"):"not-configured";
     DxrMap_RequestScene(state.requested);
     state.stats=observation("-rt-light-stats");state.details=observation("-rt-light-pixels");

@@ -6,12 +6,15 @@
 #define WIN32_LEAN_AND_MEAN
 #define COBJMACROS
 #include <windows.h>
+#include <imm.h>
 #include <initguid.h>
 #include <d3d12.h>
 #include <dxgi1_4.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <io.h>
+#include <fcntl.h>
 
 #undef boolean
 
@@ -26,6 +29,8 @@
 #include "gbuffer.h"
 #include "m_argv.h"
 #include "ngx_dlss.h"
+#include "graphics_settings.h"
+#include "nr_control.h"
 #include "anime4k.h"
 #include "fsr2.h"
 #include "png_export.h"
@@ -46,6 +51,10 @@ extern boolean singletics;
 #define FRAME_COUNT 2
 
 static HWND g_hwnd;
+static FILE *g_graphics_trace;
+static unsigned g_graphics_frame, g_nr_epoch;
+static int g_nr_loaded;
+extern char *defaultfile;
 static int g_mouse_grab;
 static int g_mouse_buttons;
 static int g_have_focus = 1;
@@ -204,12 +213,69 @@ static void grab_mouse(int grab)
 	ShowCursor(TRUE);
 }
 
+/* Keep renderer pixels independent of desktop DPI virtualization. These calls
+   affect only this process/owned HWND, never the user's monitor settings. */
+static void configure_window_dpi(void)
+{
+    HMODULE user = GetModuleHandleW(L"user32.dll");
+    typedef BOOL (WINAPI *ContextFn)(HANDLE);
+    ContextFn context = (ContextFn)GetProcAddress(user, "SetProcessDpiAwarenessContext");
+    if (context && context((HANDLE)(intptr_t)-4))
+        fprintf(stderr, "Graphics DPI policy: per-monitor aware v2\n");
+    else if (SetProcessDPIAware())
+        fprintf(stderr, "Graphics DPI policy: system aware fallback\n");
+    else
+        fprintf(stderr, "Graphics DPI policy: existing process policy retained\n");
+}
+static void fit_game_window(HWND window, const RECT *suggested, UINT changed_dpi)
+{
+    HMODULE user = GetModuleHandleW(L"user32.dll");
+    typedef BOOL (WINAPI *AdjustFn)(LPRECT,DWORD,BOOL,DWORD,UINT);
+    typedef UINT (WINAPI *DpiFn)(HWND);
+    AdjustFn adjust = (AdjustFn)GetProcAddress(user, "AdjustWindowRectExForDpi");
+    DpiFn get_dpi = (DpiFn)GetProcAddress(user, "GetDpiForWindow");
+    MONITORINFO monitor = {sizeof(MONITORINFO)};
+    RECT extent = {0,0,WIN_W,WIN_H}, current;
+    DWORD style = (DWORD)GetWindowLongPtrA(window,GWL_STYLE);
+    DWORD extra_style = (DWORD)GetWindowLongPtrA(window,GWL_EXSTYLE);
+    UINT dpi = changed_dpi ? changed_dpi : (get_dpi ? get_dpi(window) : 96);
+    int extra_width,extra_height,width=WIN_W,height=WIN_H,available_width,available_height,x,y;
+    HMONITOR target = suggested ? MonitorFromRect(suggested,MONITOR_DEFAULTTONEAREST) : MonitorFromWindow(window,MONITOR_DEFAULTTONEAREST);
+    if(!GetWindowRect(window,&current) || !GetMonitorInfoA(target,&monitor))return;
+    if(!adjust || !adjust(&extent,style,FALSE,extra_style,dpi))
+        AdjustWindowRectEx(&extent,style,FALSE,extra_style);
+    extra_width=extent.right-extent.left-WIN_W;
+    extra_height=extent.bottom-extent.top-WIN_H;
+    available_width=monitor.rcWork.right-monitor.rcWork.left-extra_width;
+    available_height=monitor.rcWork.bottom-monitor.rcWork.top-extra_height;
+    if(available_width<1 || available_height<1)return;
+    if(width>available_width){width=available_width;height=(int)((long long)WIN_H*width/WIN_W);}
+    if(height>available_height){height=available_height;width=(int)((long long)WIN_W*height/WIN_H);}
+    if(width<1 || height<1)return;
+    x=suggested?suggested->left:current.left;y=suggested?suggested->top:current.top;
+    if(x+width+extra_width>monitor.rcWork.right)x=monitor.rcWork.right-width-extra_width;
+    if(y+height+extra_height>monitor.rcWork.bottom)y=monitor.rcWork.bottom-height-extra_height;
+    if(x<monitor.rcWork.left)x=monitor.rcWork.left;if(y<monitor.rcWork.top)y=monitor.rcWork.top;
+    SetWindowPos(window,NULL,x,y,width+extra_width,height+extra_height,SWP_NOZORDER|SWP_NOACTIVATE);
+}
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     event_t ev;
 
+    if ((msg == WM_KEYDOWN || msg == WM_KEYUP ||
+         msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP) &&
+        M_CheckParm("-input-trace"))
+        fprintf(stderr, "Input window event: message=%u vk=%llu translated=%d previous=%d scan=%u menu=%d tic=%d layout=%p\n",
+                msg, (unsigned long long)wparam, xlatekey(wparam),
+                (int)((lparam >> 30) & 1), (unsigned)((lparam >> 16) & 255),
+                menuactive != 0, gametic, (void *)GetKeyboardLayout(0));
+
     switch (msg)
     {
+      case WM_DPICHANGED:
+        fit_game_window(hwnd, (const RECT *)lparam, HIWORD(wparam));
+        return 0;
       case WM_CLOSE:
 	I_Quit();
 	return 0;
@@ -908,6 +974,86 @@ static void init_d3d(HWND hwnd)
 	I_Error("G-buffer textures failed");
 }
 
+/* All callers are after the renderer queue fence. Optional resources never
+   own the completed RT/native color and cannot terminate the game. */
+static void release_hi_res(void) {
+ if(g_tex_color_hi)ID3D12Resource_Release(g_tex_color_hi);g_tex_color_hi=NULL;
+ if(g_tex_depth_hi)ID3D12Resource_Release(g_tex_depth_hi);g_tex_depth_hi=NULL;
+ if(g_tex_velocity_hi)ID3D12Resource_Release(g_tex_velocity_hi);g_tex_velocity_hi=NULL;
+ if(g_up_color_hi)ID3D12Resource_Release(g_up_color_hi);g_up_color_hi=NULL;
+ if(g_up_depth_hi)ID3D12Resource_Release(g_up_depth_hi);g_up_depth_hi=NULL;
+ if(g_up_velocity_hi)ID3D12Resource_Release(g_up_velocity_hi);g_up_velocity_hi=NULL;
+}
+static void prepare_ngx_optional(void) {
+ if(Ngx_WantsLinearDepth()&&!g_tex_depth_linear) {
+  g_st_depth_linear=D3D12_RESOURCE_STATE_COPY_DEST;
+  g_tex_depth_linear=make_tex(GB_WIDTH,GB_HEIGHT,DXGI_FORMAT_R32_FLOAT,D3D12_RESOURCE_FLAG_NONE,g_st_depth_linear,L"GB_LinearDepthLegacyRR");
+  g_up_depth_linear=make_upload(upload_bytes(GB_WIDTH,GB_HEIGHT,4));
+  if(!g_tex_depth_linear||!g_up_depth_linear){
+   if(g_tex_depth_linear)ID3D12Resource_Release(g_tex_depth_linear);
+   if(g_up_depth_linear)ID3D12Resource_Release(g_up_depth_linear);
+   g_tex_depth_linear=g_up_depth_linear=NULL;
+   fprintf(stderr,"NGX optional linear depth failed; legacy RR falls back to SR\n");
+  }
+ }
+ if(Ngx_WantsHiRes()&&!g_tex_depth_hi) {
+  if(Ngx_DiagnosticFailure("hires")||!init_hi_res()){
+   release_hi_res();Ngx_CarrierUnavailable();
+   fprintf(stderr,"NGX optional carrier buffers failed; completed SR/RT/native retained\n");
+  }
+ }
+}
+static void apply_graphics_requests(void) {
+ unsigned changes=Graphics_TakePending();NrControlStatus nr;
+ NrControl_Poll();nr=NrControl_GetStatus();
+ if(nr.epoch!=g_nr_epoch){g_nr_epoch=nr.epoch;GB_RequestResetReason(GB_RESET_EXPLICIT);}
+ if(changes&1u){int enabled=Graphics_Get(GRAPHICS_RT).requested;
+  if(enabled)DxrMap_AllowGameplay();
+  DxrLighting_RequestEnabled(enabled&&!M_CheckParm("-rt-light-off"));
+  DxrReflection_RequestEnabled(enabled&&!M_CheckParm("-rt-reflections-off"));
+ }
+ if(changes&2u){Ngx_Shutdown();if(Graphics_Get(GRAPHICS_SR).requested)Ngx_Init(g_dev,g_queue);}
+ if(changes&4u)NrControl_Request(Graphics_Get(GRAPHICS_NR).requested);
+ if((changes&6u)||nr.loaded!=g_nr_loaded){g_nr_loaded=nr.loaded;Ngx_SetCarrierRequested(Graphics_Get(GRAPHICS_NR).requested);prepare_ngx_optional();}
+ if(changes){GB_RequestResetReason(GB_RESET_EXPLICIT);fprintf(stderr,"Graphics applied: tic=%d mask=%u after_gpu_fence=1\n",gametic,changes);}
+}
+static const char *ngx_reason(const char *reason) {
+ if(strstr(reason,"runtime"))return "graphics.reason.runtime";
+ if(strstr(reason,"capability")||strstr(reason,"driver"))return "graphics.reason.capability";
+ if(strstr(reason,"create"))return "graphics.reason.create";
+ if(strstr(reason,"evaluate"))return "graphics.reason.evaluate";
+ return "graphics.reason.init";
+}
+static void record_graphics(int light,int reflection,int ngx,int reset) {
+ GraphicsStatus rt,sr,nr;DxrLightingStatus l=DxrLighting_GetStatus();DxrReflectionStatus r=DxrReflection_GetStatus();
+ NgxStatus n=Ngx_GetStatus();NrControlStatus control=NrControl_GetStatus();const GB_FrameInputs *frame=GB_GetFrameInputs();
+ int scene=GB_HasScenePixels()&&GB_GetDebugView()==GB_VIEW_COLOR;
+ rt=Graphics_Get(GRAPHICS_RT);
+ if(!rt.requested)Graphics_SetActual(GRAPHICS_RT,GRAPHICS_OFF,"graphics.reason.off");
+ else if(!DxrMap_Available())Graphics_SetActual(GRAPHICS_RT,GRAPHICS_UNAVAILABLE,"graphics.reason.no_dxr");
+ else if(!l.available&&!r.available)Graphics_SetActual(GRAPHICS_RT,GRAPHICS_UNAVAILABLE,"graphics.reason.no_effects");
+ else if(!l.requested&&!r.requested)Graphics_SetActual(GRAPHICS_RT,GRAPHICS_OFF,"graphics.reason.effects_disabled");
+ else if(!scene)Graphics_SetActual(GRAPHICS_RT,GRAPHICS_PAUSED,"graphics.reason.non_scene");
+ else if(light||reflection)Graphics_SetActual(GRAPHICS_RT,(l.requested&&!light)||(r.requested&&!reflection)?GRAPHICS_FALLBACK:GRAPHICS_ACTIVE,(l.requested&&!light)||(r.requested&&!reflection)?"graphics.reason.rt_partial":"graphics.reason.none");
+ else Graphics_SetActual(GRAPHICS_RT,GRAPHICS_FALLBACK,"graphics.reason.rt_failed");
+ sr=Graphics_Get(GRAPHICS_SR);
+ if(!sr.requested)Graphics_SetActual(GRAPHICS_SR,GRAPHICS_OFF,"graphics.reason.off");
+ else if(!n.compiled)Graphics_SetActual(GRAPHICS_SR,GRAPHICS_UNAVAILABLE,"graphics.reason.not_compiled");
+ else if(ngx)Graphics_SetActual(GRAPHICS_SR,!strncmp(n.feature,"RR",2)?GRAPHICS_FALLBACK:GRAPHICS_ACTIVE,!strncmp(n.feature,"RR",2)?"graphics.reason.legacy_rr":"graphics.reason.none");
+ else if(!n.ready)Graphics_SetActual(GRAPHICS_SR,GRAPHICS_FALLBACK,ngx_reason(n.reason));
+ else Graphics_SetActual(GRAPHICS_SR,GRAPHICS_PAUSED,"graphics.reason.non_scene");
+ nr=Graphics_Get(GRAPHICS_NR);
+ if(!control.loaded)Graphics_SetActual(GRAPHICS_NR,nr.requested?GRAPHICS_UNAVAILABLE:GRAPHICS_OFF,nr.requested?"graphics.reason.backend_missing":"graphics.reason.off");
+ else if(control.pending)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_PENDING,control.reason);
+ else if(!control.supported)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_UNKNOWN,control.reason);
+ else if(control.confirmed!=nr.requested)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_UNKNOWN,"graphics.reason.confirmation_failed");
+ else if(!nr.requested)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_OFF,"graphics.reason.off");
+ else if(control.execution_verified)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_ACTIVE,"graphics.reason.none");
+ else Graphics_SetActual(GRAPHICS_NR,GRAPHICS_UNVERIFIED,!sr.requested?"graphics.reason.no_input":(strcmp(n.carrier_reason,"none")?(!strcmp(n.carrier_reason,"hires-allocation-failed")?"graphics.reason.hires":"graphics.reason.carrier"):"graphics.reason.execution_unverified"));
+ rt=Graphics_Get(GRAPHICS_RT);sr=Graphics_Get(GRAPHICS_SR);nr=Graphics_Get(GRAPHICS_NR);g_graphics_frame++;
+ if(g_graphics_trace){fprintf(g_graphics_trace,"%u,%d,%d,%d,%d,%s,%s,%s,%s,%s,%s,%d,%u,%u,%d,%d,%d,%s,%d,%d,%d,%d,%d,%u,%d",g_graphics_frame,gametic,rt.requested,sr.requested,nr.requested,Graphics_StateKey(rt.state),Graphics_StateKey(sr.state),Graphics_StateKey(nr.state),rt.reason,sr.reason,nr.reason,reset,frame->reset_reasons,frame->history_valid,light,reflection,ngx,n.feature,n.carrier_evaluated,control.loaded,control.supported,control.confirmed,control.pending,control.epoch,control.execution_verified);fprintf(g_graphics_trace,",%s,%s,%s",n.carrier_reason,l.reason,r.reason);fputc('\n',g_graphics_trace);fflush(g_graphics_trace);}
+}
+
 void I_StartFrame(void)
 {
     GB_BeginFrame();
@@ -981,13 +1127,15 @@ void I_FinishUpdate(void)
         if (delta_ms <= 0.0f) delta_ms = 0.001f;
         GB_SetFrameTiming(gametic, delta_ms, singletics != 0, menuactive != 0, paused != 0, gameepisode, gamemap);
     }
+    wait_gpu();
+    GpuTiming_Collect();
+    apply_graphics_requests();
+    Ngx_BeginFrame();
     GB_ConvertColor(screens[0]);
     DxrMap_DetectChanges();
     GB_EndFrame();
     reset = GB_ConsumeReset();
 
-    wait_gpu();
-    GpuTiming_Collect();
     DxrDiag_Prepare();
     DxrMap_Prepare();
     DxrLighting_Prepare();
@@ -1122,6 +1270,7 @@ void I_FinishUpdate(void)
     Ngx_RecordPresented(used_ngx, used_fsr2 ? "fsr2" :
                         (used_a4k ? "anime4k-fast" : "nearest"));
 
+    record_graphics(used_rt,used_reflection,used_ngx,reset);
     FrameTrace_Record(used_ngx, used_fsr2);
     GpuTiming_Mark(g_cmd, 2);
     if (used_ngx || used_a4k || used_fsr2)
@@ -1215,6 +1364,8 @@ void I_ShutdownGraphics(void)
     Anime4K_Shutdown();
     Fsr2_Shutdown();
     Ngx_Shutdown();
+    NrControl_Shutdown();
+    if(g_graphics_trace){fclose(g_graphics_trace);g_graphics_trace=NULL;}
     if (g_readback) ID3D12Resource_Release(g_readback);
     if (g_up_present) ID3D12Resource_Release(g_up_present);
     if (g_up_velocity_hi) ID3D12Resource_Release(g_up_velocity_hi);
@@ -1265,12 +1416,23 @@ void I_ShutdownGraphics(void)
     GB_Shutdown();
 }
 
+static void log_window_metrics(void) {
+ RECT client,window;MONITORINFO monitor={sizeof(MONITORINFO)};HMODULE user=GetModuleHandleW(L"user32.dll");
+ typedef UINT (WINAPI *DpiFn)(HWND);typedef HANDLE (WINAPI *WindowContextFn)(HWND);
+ typedef HANDLE (WINAPI *ThreadContextFn)(void);typedef int (WINAPI *AwarenessFn)(HANDLE);
+ DpiFn dpi=(DpiFn)GetProcAddress(user,"GetDpiForWindow");WindowContextFn context=(WindowContextFn)GetProcAddress(user,"GetWindowDpiAwarenessContext");
+ ThreadContextFn thread=(ThreadContextFn)GetProcAddress(user,"GetThreadDpiAwarenessContext");AwarenessFn awareness=(AwarenessFn)GetProcAddress(user,"GetAwarenessFromDpiAwarenessContext");
+ GetClientRect(g_hwnd,&client);GetWindowRect(g_hwnd,&window);GetMonitorInfoA(MonitorFromWindow(g_hwnd,MONITOR_DEFAULTTONEAREST),&monitor);
+ fprintf(stderr,"Graphics window metrics: client=%ldx%ld window=(%ld,%ld,%ld,%ld) workarea=(%ld,%ld,%ld,%ld) window_dpi=%u window_awareness=%d thread_awareness=%d process_legacy_dpi_aware=%d engine=%dx%d (caller-coordinate metrics; external DPI-aware capture may differ)\n",client.right,client.bottom,window.left,window.top,window.right,window.bottom,monitor.rcWork.left,monitor.rcWork.top,monitor.rcWork.right,monitor.rcWork.bottom,dpi?dpi(g_hwnd):0,context&&awareness?awareness(context(g_hwnd)):-1,thread&&awareness?awareness(thread()):-1,IsProcessDPIAware()!=0,WIN_W,WIN_H);
+}
+
 void I_InitGraphics(void)
 {
     WNDCLASSA wc;
     RECT rc;
     DWORD style;
 
+    configure_window_dpi();
     QueryPerformanceFrequency(&g_frame_frequency);
     g_frame_last.QuadPart = 0;
     GB_Init();
@@ -1334,6 +1496,13 @@ void I_InitGraphics(void)
     if (!g_hwnd)
 	I_Error("CreateWindow failed");
 
+    /* This legacy game's input is virtual-key driven, including ASCII menu,
+       save-name and chat input. IME composition otherwise replaces ordinary
+       keydowns with VK_PROCESSKEY before WndProc sees them. Detach only this
+       owned HWND; leave the user's HKL and every other window unchanged. */
+    ImmAssociateContext(g_hwnd, NULL);
+    fit_game_window(g_hwnd, NULL, 0);
+
     init_d3d(g_hwnd);
     DxrDiag_Init(g_dev, g_queue, WIN_W, WIN_H,
                  M_CheckParm("-rt-diagnostic") != 0 && !M_CheckParm("-rt-map-depth") && !M_CheckParm("-rt-map-normal"), M_CheckParm("-nort") != 0);
@@ -1341,25 +1510,28 @@ void I_InitGraphics(void)
                 M_CheckParm("-rt-map-normal") ? 2 : (M_CheckParm("-rt-map-depth") ? 1 : 0), M_CheckParm("-nort") != 0);
     DxrLighting_Init(g_dev, WIN_W, WIN_H);
     DxrReflection_Init(g_dev, WIN_W, WIN_H);
-    if (Ngx_Wanted())
-	Ngx_Init(g_dev, g_queue);
-    else
-        fprintf(stderr, "NGX disabled: sr_switch=off (-nodlss/-nosr), renderer continues\n");
-    if (Ngx_WantsLinearDepth()) {
-        g_st_depth_linear = D3D12_RESOURCE_STATE_COPY_DEST;
-        g_tex_depth_linear = make_tex(GB_WIDTH, GB_HEIGHT, DXGI_FORMAT_R32_FLOAT,
-                                     D3D12_RESOURCE_FLAG_NONE, g_st_depth_linear,
-                                     L"GB_LinearDepthLegacyRR");
-        g_up_depth_linear = make_upload(upload_bytes(GB_WIDTH, GB_HEIGHT, 4));
-        if (!g_tex_depth_linear || !g_up_depth_linear) {
-            if (g_tex_depth_linear) ID3D12Resource_Release(g_tex_depth_linear);
-            if (g_up_depth_linear) ID3D12Resource_Release(g_up_depth_linear);
-            g_tex_depth_linear = g_up_depth_linear = NULL;
-            fprintf(stderr, "NGX: legacy RR linear-depth allocation failed; SR fallback retained\n");
-        }
+    {
+      unsigned defaults=Ngx_Compiled()?2u:0u,cli_mask=0,cli_values=0;
+      if(Ngx_DefaultNr())defaults|=4u;
+      if(M_CheckParm("-rt")||M_CheckParm("-rt-light")||M_CheckParm("-rt-materials")){cli_mask|=1;cli_values|=1;}
+      if(M_CheckParm("-nort")){cli_mask|=1;cli_values&=~1u;}
+      if(M_CheckParm("-sr")||M_CheckParm("-dlss")){cli_mask|=2;cli_values|=2;}
+      if(M_CheckParm("-nosr")||M_CheckParm("-nodlss")){cli_mask|=2;cli_values&=~2u;}
+      if(M_CheckParm("-nr")){cli_mask|=4;cli_values|=4;}
+      if(M_CheckParm("-nonr")){cli_mask|=4;cli_values&=~4u;}
+      Graphics_Init(defaultfile,defaults,cli_mask,cli_values);
+      apply_graphics_requests(); /* initial queue has no pending work */
     }
-    if (Ngx_WantsHiRes() && !init_hi_res())
-	I_Error("NGX hi-res G-buffers failed");
+    {
+      int arg=M_CheckParm("-graphics-stats");
+      if(arg&&arg+1<myargc){HANDLE file=CreateFileA(myargv[arg+1],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
+       if(file!=INVALID_HANDLE_VALUE){int descriptor=_open_osfhandle((intptr_t)file,_O_WRONLY|_O_TEXT);
+        if(descriptor>=0){g_graphics_trace=_fdopen(descriptor,"w");if(!g_graphics_trace)_close(descriptor);}else CloseHandle(file);
+       }
+       else fprintf(stderr,"Graphics observer refuses existing/unavailable path\n");
+       if(g_graphics_trace)fprintf(g_graphics_trace,"frame,game_tic,rt_requested,sr_requested,nr_requested,rt_state,sr_state,nr_state,rt_reason,sr_reason,nr_reason,temporal_reset,frame_reset_reasons,history_valid,light_evaluated,reflection_evaluated,ngx_evaluated,ngx_feature,carrier_evaluated,consumer_loaded,control_supported,control_confirmed,control_pending,control_epoch,nr_execution_verified,carrier_reason,lighting_reason,reflection_reason\n");
+      }
+    }
     if (!Ngx_Ready() && Fsr2_Wanted())
 	Fsr2_Init(g_dev);
     if (!Ngx_Ready() && !Fsr2_Ready())
@@ -1371,6 +1543,7 @@ void I_InitGraphics(void)
     }
     ShowWindow(g_hwnd, SW_SHOW);
     UpdateWindow(g_hwnd);
+    log_window_metrics();
     grab_mouse(1);
     fprintf(stderr, "I_InitGraphics: D3D12CreateDevice %dx%d (internal %dx%d)\n",
 	    WIN_W, WIN_H, SCREENWIDTH, SCREENHEIGHT);

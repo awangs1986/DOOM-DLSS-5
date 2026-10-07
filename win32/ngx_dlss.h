@@ -6,6 +6,14 @@
 extern "C" {
 #endif
 
+typedef struct { int compiled, ready, carrier_evaluated; unsigned sr_successes, sr_failures; const char *reason, *carrier_reason, *feature; } NgxStatus;
+NgxStatus Ngx_GetStatus(void);
+int Ngx_Compiled(void);
+int Ngx_DefaultNr(void);
+void Ngx_SetCarrierRequested(int requested); /* fenced renderer only */
+void Ngx_CarrierUnavailable(void);
+int Ngx_DiagnosticFailure(const char *stage);
+void Ngx_BeginFrame(void);
 int  Ngx_Wanted(void);
 /* Call once per frame after the chosen NGX output is known. */
 void Ngx_RecordPresented(int used_ngx, const char *fallback_mode);

@@ -201,6 +201,13 @@ for %%S in (dxr_reflection_trace dxr_reflection_compose) do (
     if errorlevel 1 exit /b 1
   )
 )
+rem Default effect resources are configure-only. Preserve existing local edits.
+for %%R in (rt-light.cfg rt-materials.cfg) do (
+  if not exist "%DEST%\%%R" (
+    copy "%~dp0%%R" "%DEST%\%%R" >nul
+    if errorlevel 1 exit /b 1
+  )
+)
 mkdir "%DEST%\languages" 2>nul
 copy /Y "%~dp0languages\*.ini" "%DEST%\languages\" >nul
 if errorlevel 1 exit /b 1

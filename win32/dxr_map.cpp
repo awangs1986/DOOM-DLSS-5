@@ -367,6 +367,7 @@ extern "C" const MapSurface* DxrMap_GetSurface(unsigned instance,unsigned geomet
  return nullptr;
 }
 
+extern "C" void DxrMap_AllowGameplay(void) {state.disabled=false;state.failed_generation=false;}
 extern "C" void DxrMap_RequestSceneFor(unsigned consumer,int requested) {
  if(requested){state.consumers|=consumer;state.failed_generation=false;}else state.consumers&=~consumer;
 }
