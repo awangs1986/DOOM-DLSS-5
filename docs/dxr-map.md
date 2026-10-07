@@ -1,5 +1,7 @@
 # 真实静态地图 DXR 场景（#11）
 
+> 本文保留该票首次交付的实现与验收快照；当前动态扇区、分组 AS 和版本更新规则见 [动态场景文档](dxr-dynamic-map.md)。
+
 ## 使用
 
 Windows x64、支持 DXR 1.1 / Shader Model 6.5 的硬件适配器，以及构建生成的 `shaders/dxr_map.cso`：

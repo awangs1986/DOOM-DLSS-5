@@ -980,6 +980,7 @@ void I_FinishUpdate(void)
         GB_SetFrameTiming(gametic, delta_ms, singletics != 0, menuactive != 0, paused != 0, gameepisode, gamemap);
     }
     GB_ConvertColor(screens[0]);
+    DxrMap_DetectChanges();
     GB_EndFrame();
     reset = GB_ConsumeReset();
 

@@ -90,7 +90,7 @@ struct Builder {
   vertices.push_back(out);return static_cast<uint32_t>(vertices.size()-1);
  }
  MapSurface& setup(uint32_t id,unsigned kind,uint32_t line,uint32_t side,uint32_t sector,uint32_t back,uint32_t flags,int material) {
-  auto& s=surfaces[id];if(!s.active) {s.active=1;s.kind=kind;s.line=line;s.side=side;s.sector=sector;s.back_sector=back;s.flags=flags;s.base_material=material;} return s;
+  auto& s=surfaces[id];if(!s.active) {s.active=1;s.kind=kind;s.line=line;s.side=side;s.sector=sector;s.back_sector=back;s.flags=flags;s.base_material=material;s.lightlevel=in.sectors[sector].lightlevel;} return s;
  }
  void plane(uint32_t leaf,const std::vector<MapPoint>& p,bool ceiling) {
   auto sector=in.leaves[leaf].sector;auto source=in.sectors[sector];if(source.floor_height==source.ceiling_height||(ceiling?source.ceiling_sky:source.floor_sky)) return;
@@ -145,6 +145,13 @@ struct Builder {
     wall(i,side,MAP_WALL_MID,f.floor_height,f.ceiling_height,(l.flags&MAP_FLAG_DONTPEGBOTTOM)?f.floor_height+sd.texture_height[MAP_WALL_MID]:f.ceiling_height);
    } else {
     auto b=in.sectors[in.sides[l.side[side^1]].sector];
+    if(sd.material[MAP_WALL_MID]>0 && sd.texture_height[MAP_WALL_MID]>0) {
+     double bottom=std::max(f.floor_height,b.floor_height),top=std::min(f.ceiling_height,b.ceiling_height);
+     double anchor=(l.flags&MAP_FLAG_DONTPEGBOTTOM)?bottom+sd.texture_height[MAP_WALL_MID]:top;
+     wall(i,side,MAP_WALL_MID,bottom,top,anchor);
+     auto &mid=surfaces[MapMesh_WallSurface(i,side,MAP_WALL_MID)];
+     if(mid.active)mid.masked=1;
+    }
     if(!(f.ceiling_sky&&b.ceiling_sky)&&b.ceiling_height<f.ceiling_height)
      wall(i,side,MAP_WALL_UPPER,std::max(f.floor_height,b.ceiling_height),f.ceiling_height,(l.flags&MAP_FLAG_DONTPEGTOP)?f.ceiling_height:b.ceiling_height+sd.texture_height[MAP_WALL_UPPER]);
     if(b.floor_height>f.floor_height)

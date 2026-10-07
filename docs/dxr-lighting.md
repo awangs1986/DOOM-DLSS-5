@@ -1,5 +1,7 @@
 # 静态实体地图点光源与硬阴影（#12）
 
+> 本文保留该票首次交付的实现与验收快照；当前动态扇区、分组 AS 和版本更新规则见 [动态场景文档](dxr-dynamic-map.md)。
+
 ## 使用
 
 Windows x64、DXR 1.1 / Shader Model 6.5 硬件适配器，保留构建生成的 `shaders/dxr_lighting.cso`：
