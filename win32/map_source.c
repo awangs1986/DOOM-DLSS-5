@@ -74,7 +74,7 @@ int MapSource_Survey(MapWorldRevision *r)
  int i,j;
  if(!r||numsectors<1||numsectors>1000000||numsides<1||numsides>1000000)return 0;
  memset(r,0,sizeof(*r));r->sectors=numsectors;r->sides=numsides;
- r->geometry=r->material=r->lighting=UINT64_C(14695981039346656037);
+ r->geometry=r->material=r->lighting=r->mapping=UINT64_C(14695981039346656037);
  for(i=0;i<numsectors;i++){
   revision_word(&r->geometry,sectors[i].floorheight);revision_word(&r->geometry,sectors[i].ceilingheight);
   revision_word(&r->geometry,sectors[i].floorpic==skyflatnum);revision_word(&r->geometry,sectors[i].ceilingpic==skyflatnum);
@@ -83,7 +83,7 @@ int MapSource_Survey(MapWorldRevision *r)
  }
  for(i=0;i<numsides;i++){
   int ids[3]={sides[i].midtexture,sides[i].toptexture,sides[i].bottomtexture};
-  revision_word(&r->material,sides[i].textureoffset);revision_word(&r->material,sides[i].rowoffset);
+  revision_word(&r->mapping,sides[i].textureoffset);revision_word(&r->mapping,sides[i].rowoffset);
   for(j=0;j<3;j++){
    revision_word(&r->material,ids[j]);
    /* Animation may alter masked span/pegging through resolved texture height. */
@@ -102,4 +102,29 @@ int MapSource_GetSectorHeights(unsigned sector,double *floor,double *ceiling)
 {
  if(sector>=(unsigned)numsectors)return 0;
  *floor=sectors[sector].floorheight/65536.0;*ceiling=sectors[sector].ceilingheight/65536.0;return 1;
+}
+
+int MapSource_UpdateMapping(MapMesh *mesh)
+{
+ size_t i,t;float *delta;
+ if(!mesh)return 0;
+ delta=calloc(mesh->surface_count*2,sizeof(float));if(!delta)return 0;
+ for(i=0;i<mesh->surface_count;i++){
+  MapSurface *surface=&mesh->surfaces[i];
+  if(surface->active&&surface->kind<=MAP_WALL_LOWER&&surface->side<(unsigned)numsides){
+   float x=sides[surface->side].textureoffset/65536.0f,y=sides[surface->side].rowoffset/65536.0f;
+   delta[i*2]=x-surface->x_offset;delta[i*2+1]=y-surface->y_offset;
+   surface->x_offset=x;surface->y_offset=y;surface->v_anchor+=delta[i*2+1];
+  }
+ }
+ /* Published shader mesh is triangle-expanded; each vertex has a single surface.
+    No BLAS reads UV, so only its canonical shader upload is refreshed. */
+ for(t=0;t<mesh->triangle_count;t++){
+  uint32_t id=mesh->triangle_surfaces[t];unsigned v;
+  for(v=0;v<3;v++){
+   MapMeshVertex *vertex=&mesh->vertices[mesh->indices[t*3+v]];
+   vertex->uv[0]+=delta[id*2];vertex->uv[1]+=delta[id*2+1];
+  }
+ }
+ free(delta);return 1;
 }

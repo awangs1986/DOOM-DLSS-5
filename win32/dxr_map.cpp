@@ -43,7 +43,7 @@ struct State {
  MapMesh mesh={};DxrMapSceneView view={};
  std::vector<Group> groups;std::vector<MapGeometryRange> ranges;MapWorldRevision world={};
  uint64_t geometry_revision=0,material_revision=0,shading_revision=0;
- bool capture_pending=true,lighting_pending=false;
+ bool capture_pending=true,lighting_pending=false,mapping_pending=false;
  unsigned refits=0,rebuilds=0,watch_sector=UINT32_MAX;double capture_ms=0,blas_ms=0,tlas_ms=0;UINT64 resident_bytes=0;
  uint64_t generation=0;char map_name[9]={};unsigned consumers=0;bool loaded=false,supported=false,enabled=false,disabled=false,ready=false,failed_generation=false,pending=false;
  int mode=0,hit_tic=-1,last_hit_tic=-1,frame_tic=0;unsigned width=0,height=0,row_pitch=0,frame_id=0;
@@ -282,7 +282,7 @@ extern "C" void DxrMap_Init(void* device,void* queue,unsigned width,unsigned hei
  if(state.details)std::fprintf(state.details,"frame,game_tic,generation,x,y,flags,reference_depth,ray_depth,nx,ny,nz,reference_nr,reference_ng,reference_nb,surface,primitive,geometry,instance,hit\n");
 }
 extern "C" void DxrMap_LevelLoaded(const char* name) {
- state.generation++;state.world={};state.geometry_revision=state.material_revision=state.shading_revision=0;state.capture_pending=true;state.lighting_pending=false;state.loaded=true;state.failed_generation=false;state.last_hit_tic=-1;
+ state.generation++;state.world={};state.geometry_revision=state.material_revision=state.shading_revision=0;state.capture_pending=true;state.lighting_pending=false;state.mapping_pending=false;state.loaded=true;state.failed_generation=false;state.last_hit_tic=-1;
  std::snprintf(state.map_name,sizeof(state.map_name),"%.8s",name?name:"unknown");
  if(state.mode)std::fprintf(stderr,"DXR map: new generation=%llu map=%s marked dirty; snapshot deferred until restored-world scene frame\n",static_cast<unsigned long long>(state.generation),state.map_name);
 }
@@ -293,9 +293,11 @@ extern "C" void DxrMap_DetectChanges(void) {
  bool geometry=initial||current.geometry!=state.world.geometry;
  bool material=initial||current.material!=state.world.material;
  bool lighting=initial||current.lighting!=state.world.lighting;
+ bool mapping=initial||current.mapping!=state.world.mapping;
  if(geometry){state.geometry_revision++;state.capture_pending=true;if(!initial)GB_RequestResetReason(GB_RESET_GEOMETRY);}
  if(geometry||material){state.material_revision++;state.capture_pending=true;}
- if(geometry||material||lighting){state.shading_revision++;state.lighting_pending=true;if(!initial&&!geometry)GB_RequestResetReason(GB_RESET_SHADING);}
+ if(mapping)state.mapping_pending=true;
+ if(geometry||material||lighting||mapping){state.shading_revision++;state.lighting_pending=true;if(!initial&&!geometry)GB_RequestResetReason(GB_RESET_SHADING);}
  state.world=current;
 }
 extern "C" void DxrMap_Prepare(void) {
@@ -316,7 +318,8 @@ extern "C" void DxrMap_Prepare(void) {
     if(!state.rays||!state.flags||!state.original||!state.output||!state.hits||!state.readback)throw std::runtime_error("map diagnostic allocation failed");
    }
    state.refits=state.rebuilds=0;state.capture_ms=state.blas_ms=state.tlas_ms=0;
-   if(!state.ready||state.capture_pending) { if(!build_scene())throw std::runtime_error("map scene unavailable");state.ready=true;state.capture_pending=false; }
+   if(!state.ready||state.capture_pending) { if(!build_scene())throw std::runtime_error("map scene unavailable");state.ready=true;state.capture_pending=false;state.mapping_pending=false; }
+   if(state.mapping_pending){if(!MapSource_UpdateMapping(&state.mesh)||!upload(state.vertices.Get(),state.mesh.vertices,state.mesh.vertex_count*sizeof(MapMeshVertex)))throw std::runtime_error("map UV update failed");state.mapping_pending=false;}
    if(state.lighting_pending){MapSource_UpdateLightLevels(&state.mesh);state.view.shading_revision=state.shading_revision;state.lighting_pending=false;}
    if(state.updates){double floor=0,ceiling=0;MapSource_GetSectorHeights(state.watch_sector,&floor,&ceiling);auto frame=GB_GetFrameInputs();std::fprintf(state.updates,"%u,%d,%llu,%llu,%llu,%llu,%u,%u,%zu,%u,%u,%.6f,%.6f,%.6f,%llu,%u,%.3f,%.3f\n",frame->frame_id,frame->game_tic,static_cast<unsigned long long>(state.generation),static_cast<unsigned long long>(state.geometry_revision),static_cast<unsigned long long>(state.material_revision),static_cast<unsigned long long>(state.shading_revision),frame->reset_reasons,frame->history_valid,state.mesh.triangle_count,state.refits,state.rebuilds,state.capture_ms,state.blas_ms,state.tlas_ms,static_cast<unsigned long long>(state.resident_bytes),state.watch_sector,floor,ceiling);std::fflush(state.updates);}
   }catch(const std::exception& error){std::fprintf(stderr,"DXR map: generation=%llu initialization failed: %s; normal present retained\n",static_cast<unsigned long long>(state.generation),error.what());release_scene();state.failed_generation=true;return;}
