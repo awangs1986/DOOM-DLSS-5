@@ -35,8 +35,8 @@ rcsid[] = "$Id: m_menu.c,v 1.7 1997/02/03 22:45:10 b1 Exp $";
 
 #include "doomdef.h"
 #include "dstrings.h"
-#ifdef _WIN32
 #include "language.h"
+#ifdef _WIN32
 #include "graphics_settings.h"
 #endif
 
@@ -73,6 +73,14 @@ extern patch_t*		hu_font[HU_FONTSIZE];
 extern boolean		message_dontfuckwithme;
 
 extern boolean		chat_on;		// in heads-up code
+
+#ifdef _WIN32
+static int M_CodepointWidth(unsigned int codepoint);
+static size_t M_WrapSpan(const char *src, size_t length, char *dst, size_t capacity,
+                         int pixel_width, int max_lines);
+static size_t M_WrapText(const char *src, char *dst, size_t capacity,
+                         int pixel_width, int max_lines);
+#endif
 
 //
 // defaulted values
@@ -135,7 +143,11 @@ boolean			menuactive;
 extern boolean		sendpause;
 char			savegamestrings[10][SAVESTRINGSIZE];
 
+#ifdef _WIN32
+char	endstring[LANG_MAX_VALUE + 260];
+#else
 char	endstring[256];
+#endif
 
 
 //
@@ -399,6 +411,16 @@ static void M_GraphicsToggle(int choice){(void)choice;Graphics_SetRequested(item
 /* Convert UTF-8 first, then use the same glyph widths as M_WriteText. Each
    row is bounded in pixels and y; a wide first row cannot eat later rows. */
 static void M_GraphicsText(int x,int y,const char *text,int width,int lines){
+ if(Lang_CjkFontReady()){
+  char wrapped[LANG_MAX_VALUE+1];
+  int available=1+(168-y-12)/12;
+  if(width>SCREENWIDTH-x)width=SCREENWIDTH-x;
+  if(width<=0||available<=0)return;
+  if(lines>available)lines=available;
+  M_WrapText(text,wrapped,sizeof(wrapped),width,lines);
+  M_WriteText(x,y,wrapped);
+  return;
+ }
  char safe[LANG_MAX_VALUE+1],wrapped[LANG_MAX_VALUE+1];size_t used=0,i=0;int pixels=0,row=1,j,bottom=1;
  if(width>SCREENWIDTH-x)width=SCREENWIDTH-x;
  /* M_WriteText advances 12 pixels per newline. Include each patch's
@@ -434,8 +456,8 @@ static void M_DrawGraphics(void){
   M_GraphicsText(32,105,Lang_Text("graphics.actual"),72,1);
   M_GraphicsText(112,105,Lang_Text(Graphics_StateKey(status.state)),198,1);
   int warning=strcmp(Graphics_PreferenceReason(),"graphics.reason.none")!=0;
-  M_GraphicsText(32,122,Lang_Text(status.reason),278,warning?2:4);
-  if(warning)M_GraphicsText(32,146,Lang_Text(Graphics_PreferenceReason()),278,2);
+  M_GraphicsText(32,Lang_CjkFontReady()?120:122,Lang_Text(status.reason),278,warning?2:4);
+  if(warning)M_GraphicsText(32,Lang_CjkFontReady()?144:146,Lang_Text(Graphics_PreferenceReason()),278,2);
  }
 }
 
@@ -750,7 +772,11 @@ void M_SaveGame (int choice)
 //
 //      M_QuickSave
 //
+#ifdef _WIN32
+char    tempstring[LANG_MAX_VALUE + 260];
+#else
 char    tempstring[256];
+#endif
 
 void M_QuickSaveResponse(int ch)
 {
@@ -1049,7 +1075,10 @@ void M_DrawOptions(void)
 #ifdef _WIN32
     if (Lang_HasTranslation(detailLevel ? "option.detail.low" : "option.detail.high")) {
         char label[20];
-        Lang_MenuText(Lang_Text(detailLevel ? "option.detail.low" : "option.detail.high"), label, sizeof(label), 8, 1);
+        if (Lang_CjkFontReady())
+            M_WrapText(Lang_Text(detailLevel ? "option.detail.low" : "option.detail.high"), label, sizeof(label), 84, 1);
+        else
+            Lang_MenuText(Lang_Text(detailLevel ? "option.detail.low" : "option.detail.high"), label, sizeof(label), 8, 1);
         M_WriteText(OptionsDef.x + 175, OptionsDef.y + LINEHEIGHT * detail, label);
     } else
 #endif
@@ -1059,7 +1088,10 @@ void M_DrawOptions(void)
 #ifdef _WIN32
     if (Lang_HasTranslation(showMessages ? "option.state.on" : "option.state.off")) {
         char label[20];
-        Lang_MenuText(Lang_Text(showMessages ? "option.state.on" : "option.state.off"), label, sizeof(label), 12, 1);
+        if (Lang_CjkFontReady())
+            M_WrapText(Lang_Text(showMessages ? "option.state.on" : "option.state.off"), label, sizeof(label), 96, 1);
+        else
+            Lang_MenuText(Lang_Text(showMessages ? "option.state.on" : "option.state.off"), label, sizeof(label), 12, 1);
         M_WriteText(OptionsDef.x + 120, OptionsDef.y + LINEHEIGHT * messages, label);
     } else
 #endif
@@ -1340,6 +1372,72 @@ M_DrawSelCell
 }
 
 
+#ifdef _WIN32
+static unsigned int M_NormalizeAscii(unsigned int codepoint)
+{
+    if (codepoint == '\t') return ' ';
+    if (codepoint != '\n' && (codepoint < 32 || codepoint == 96 || codepoint > 122))
+        return '?';
+    return codepoint;
+}
+
+static int M_CodepointWidth(unsigned int codepoint)
+{
+    const unsigned char *mask;
+    int glyph;
+    if (codepoint > 0x7f)
+        return Lang_CjkGlyph((uint32_t)codepoint, &mask) ? 12 : M_CodepointWidth('?');
+    codepoint = M_NormalizeAscii(codepoint);
+    glyph = toupper((unsigned char)codepoint) - HU_FONTSTART;
+    if (glyph < 0 || glyph >= HU_FONTSIZE) return 4;
+    return SHORT(hu_font[glyph]->width);
+}
+
+static size_t M_WrapSpan(const char *src, size_t length, char *dst, size_t capacity,
+                         int pixel_width, int max_lines)
+{
+    const char *p = src, *end;
+    size_t used = 0;
+    int pixels = 0, lines = 1;
+    if (!capacity) return 0;
+    dst[0] = 0;
+    if (!src || pixel_width <= 0 || max_lines <= 0) return 0;
+    end = src + length;
+    while (p < end && used + 1 < capacity && lines <= max_lines) {
+        const char *start = p;
+        uint32_t cp;
+        int decoded = Lang_DecodeUtf8(&p, &cp);
+        size_t bytes = (size_t)(p - start);
+        int advance;
+        if (p > end) { p = end; cp = '?'; decoded = -1; bytes = 1; }
+        if (decoded < 0) { cp = '?'; bytes = 1; }
+        if (cp == '\n') {
+            if (lines == max_lines) break;
+            dst[used++] = '\n'; ++lines; pixels = 0; continue;
+        }
+        advance = M_CodepointWidth(cp);
+        if (pixels && pixels + advance > pixel_width) {
+            if (lines == max_lines || used + 1 >= capacity) break;
+            dst[used++] = '\n'; ++lines; pixels = 0;
+        }
+        if (used + bytes >= capacity) break;
+        if (decoded < 0) dst[used++] = '?';
+        else { memcpy(dst + used, start, bytes); used += bytes; }
+        pixels += advance;
+    }
+    dst[used] = 0;
+    return used;
+}
+
+static size_t M_WrapText(const char *src, char *dst, size_t capacity,
+                         int pixel_width, int max_lines)
+{
+    if (!capacity) return 0;
+    if (!src) { dst[0] = 0; return 0; }
+    return M_WrapSpan(src, strlen(src), dst, capacity, pixel_width, max_lines);
+}
+#endif
+
 void
 M_StartMessage
 ( char*		string,
@@ -1349,7 +1447,26 @@ M_StartMessage
     messageLastMenuActive = menuactive;
     messageToPrint = 1;
 #ifdef _WIN32
-    {
+    if (Lang_CjkFontReady()) {
+        static char display[LANG_MAX_VALUE + 260];
+        const char *last_break = NULL, *scan = string;
+        size_t used;
+        if (input && string) {
+            while ((scan = strstr(scan, "\n\n")) != NULL) {
+                last_break = scan;
+                scan += 2;
+            }
+        }
+        if (last_break) {
+            used = M_WrapSpan(string, (size_t)(last_break - string), display,
+                              sizeof(display), 240, 5);
+            if (used + 2 < sizeof(display)) {
+                display[used++] = '\n'; display[used++] = '\n'; display[used] = 0;
+                M_WrapText(last_break + 2, display + used, sizeof(display) - used, 240, 2);
+            }
+        } else M_WrapText(string, display, sizeof(display), 240, 8);
+        messageString = display;
+    } else {
         static char display[256];
         Lang_MenuText(string, display, sizeof(display), 30, 8);
         messageString = display;
@@ -1382,6 +1499,14 @@ int M_StringWidth(char* string)
     int             w = 0;
     int             c;
 #ifdef _WIN32
+    if (Lang_CjkFontReady()) {
+        const char *p = string;
+        uint32_t cp;
+        int decoded;
+        while ((decoded = Lang_DecodeUtf8(&p, &cp)) != 0)
+            w += M_CodepointWidth(decoded < 0 ? '?' : cp);
+        return w;
+    }
     char display[LANG_MAX_VALUE + 1];
     Lang_MenuText(string, display, sizeof(display), LANG_MAX_VALUE, 1);
     string = display;
@@ -1401,6 +1526,20 @@ int M_StringWidth(char* string)
 
 
 
+#ifdef _WIN32
+static int M_TextLineHeight(const char *string)
+{
+    const char *p = string;
+    uint32_t cp;
+    int decoded;
+    while (p && *p && *p != '\n') {
+        decoded = Lang_DecodeUtf8(&p, &cp);
+        if (decoded > 0 && cp > 0x7f && Lang_CjkGlyph(cp, NULL)) return 12;
+    }
+    return SHORT(hu_font[0]->height);
+}
+#endif
+
 //
 //      Find string height from hu_font chars
 //
@@ -1408,8 +1547,21 @@ int M_StringHeight(char* string)
 {
     int             i;
     int             h;
-    int             height = SHORT(hu_font[0]->height);
+	int             height = SHORT(hu_font[0]->height);
 	
+#ifdef _WIN32
+    if (Lang_CjkFontReady()) {
+        const char *p = string, *line = string;
+        h = M_TextLineHeight(line);
+        while (*p) {
+            if (*p++ == '\n') {
+                line = p;
+                h += M_TextLineHeight(line);
+            }
+        }
+        return h;
+    }
+#endif
     h = height;
     for (i = 0;i < strlen(string);i++)
 	if (string[i] == '\n')
@@ -1436,6 +1588,33 @@ M_WriteText
 		
 
 #ifdef _WIN32
+    if (Lang_CjkFontReady()) {
+        const char *p = string;
+        uint32_t cp;
+        int decoded;
+        cx = x; cy = y;
+        while ((decoded = Lang_DecodeUtf8(&p, &cp)) != 0) {
+            int width;
+            const unsigned char *mask = NULL;
+            if (decoded < 0) cp = '?';
+            if (cp == '\n') { cx = x; cy += 12; continue; }
+            if (cp > 0x7f && Lang_CjkGlyph(cp, &mask)) {
+                width = 12;
+                if (cx + width > SCREENWIDTH) break;
+                V_DrawCjkGlyph(cx, cy, mask, hu_font['A' - HU_FONTSTART]);
+                cx += width;
+                continue;
+            }
+            cp = M_NormalizeAscii(cp > 0x7f ? '?' : cp);
+            width = M_CodepointWidth(cp);
+            if (cx + width > SCREENWIDTH) break;
+            c = toupper((unsigned char)cp) - HU_FONTSTART;
+            if (c >= 0 && c < HU_FONTSIZE)
+                V_DrawPatchDirect(cx, cy, 0, hu_font[c]);
+            cx += width;
+        }
+        return;
+    }
     {
         /* Conversion is shared with measurement; raw UTF-8 is never cased. */
         static char display[LANG_MAX_VALUE + 1];
@@ -1890,7 +2069,7 @@ void M_Drawer (void)
     static short	y;
     short		i;
     short		max;
-    char		string[40];
+    char		string[LANG_MAX_VALUE + 260];
     int			start;
 
     inhelpscreens = false;
@@ -1914,7 +2093,7 @@ void M_Drawer (void)
 
 	    x = 160 - M_StringWidth(string)/2;
 	    M_WriteText(x,y,string);
-	    y += SHORT(hu_font[0]->height);
+	    y += M_StringHeight(string);
 	}
 	return;
     }
@@ -1938,7 +2117,10 @@ void M_Drawer (void)
         } else
         if (currentMenu == &OptionsDef && i == messages && Lang_HasTranslation("menu.messages")) {
             char label[32];
-            Lang_MenuText(Lang_Text("menu.messages"), label, sizeof(label), 13, 1);
+            if (Lang_CjkFontReady())
+                M_WrapText(Lang_Text("menu.messages"), label, sizeof(label), 104, 1);
+            else
+                Lang_MenuText(Lang_Text("menu.messages"), label, sizeof(label), 13, 1);
             M_WriteText(x, y, label);
         } else
 #endif
