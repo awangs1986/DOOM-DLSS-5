@@ -58,6 +58,7 @@ static IDXGISwapChain3 *g_swap;
 static ID3D12Resource *g_bb[FRAME_COUNT];
 static ID3D12Resource *g_tex_color;
 static ID3D12Resource *g_tex_depth;
+static ID3D12Resource *g_tex_depth_linear;
 static ID3D12Resource *g_tex_normal;
 static ID3D12Resource *g_tex_velocity;
 static ID3D12Resource *g_tex_out;
@@ -66,6 +67,7 @@ static ID3D12Resource *g_tex_depth_hi;
 static ID3D12Resource *g_tex_velocity_hi;
 static D3D12_RESOURCE_STATES g_st_color;
 static D3D12_RESOURCE_STATES g_st_depth;
+static D3D12_RESOURCE_STATES g_st_depth_linear;
 static D3D12_RESOURCE_STATES g_st_normal;
 static D3D12_RESOURCE_STATES g_st_velocity;
 static D3D12_RESOURCE_STATES g_st_out;
@@ -74,6 +76,7 @@ static D3D12_RESOURCE_STATES g_st_depth_hi;
 static D3D12_RESOURCE_STATES g_st_velocity_hi;
 static ID3D12Resource *g_up_color;
 static ID3D12Resource *g_up_depth;
+static ID3D12Resource *g_up_depth_linear;
 static ID3D12Resource *g_up_normal;
 static ID3D12Resource *g_up_velocity;
 static ID3D12Resource *g_up_color_hi;
@@ -735,11 +738,12 @@ static void overlay_hud_on_bb(ID3D12Resource *dst)
 static void nearest_upscale_ngx(void)
 {
     const unsigned char *color = GB_ColorRGBA();
-    const float *depth = GB_Depth();
+    const float *depth = GB_TemporalDepth();
+    const unsigned char *scene = GB_SceneMask();
     const float *vel = GB_VelocityRG();
     int x, y;
 
-    if (!color || !depth || !vel)
+    if (!color || !depth || !vel || !scene)
 	return;
     for (y = 0; y < WIN_H; y++)
     {
@@ -755,9 +759,9 @@ static void nearest_upscale_ngx(void)
 	    g_color_hi[di * 4 + 1] = color[si * 4 + 1];
 	    g_color_hi[di * 4 + 2] = color[si * 4 + 2];
 	    g_color_hi[di * 4 + 3] = 255;
-	    if (depth[si] <= 0.0f)
+	    if (!scene[si])
 	    {
-		g_depth_hi[di] = 0.0f;
+		g_depth_hi[di] = 1.0f;
 		g_vel_hi[di * 2 + 0] = 0.0f;
 		g_vel_hi[di * 2 + 1] = 0.0f;
 		continue;
@@ -983,8 +987,16 @@ void I_FinishUpdate(void)
     barrier(g_tex_velocity, &g_st_velocity, D3D12_RESOURCE_STATE_COPY_DEST);
     upload_tex(g_tex_color, g_up_color, GB_ColorRGBA(),
 	       GB_WIDTH, GB_HEIGHT, 4, DXGI_FORMAT_R8G8B8A8_UNORM);
-    upload_tex(g_tex_depth, g_up_depth, GB_Depth(),
+    upload_tex(g_tex_depth, g_up_depth, GB_TemporalDepth(),
 	       GB_WIDTH, GB_HEIGHT, 4, DXGI_FORMAT_R32_FLOAT);
+    if (Ngx_WantsLinearDepth() && g_tex_depth_linear && g_up_depth_linear) {
+        barrier(g_tex_depth_linear, &g_st_depth_linear, D3D12_RESOURCE_STATE_COPY_DEST);
+        upload_tex(g_tex_depth_linear, g_up_depth_linear, GB_Depth(),
+                   GB_WIDTH, GB_HEIGHT, 4, DXGI_FORMAT_R32_FLOAT);
+        barrier(g_tex_depth_linear, &g_st_depth_linear,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
     upload_tex(g_tex_normal, g_up_normal, GB_NormalRGBA(),
 	       GB_WIDTH, GB_HEIGHT, 4, DXGI_FORMAT_R8G8B8A8_UNORM);
     upload_tex(g_tex_velocity, g_up_velocity, GB_VelocityRG(),
@@ -1025,7 +1037,7 @@ void I_FinishUpdate(void)
 		    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
 		    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 	    barrier(g_tex_out, &g_st_out, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	    used_ngx = Ngx_EvaluateStack(g_cmd, g_tex_color, g_tex_depth,
+	    used_ngx = Ngx_EvaluateStack(g_cmd, g_tex_color, g_tex_depth, g_tex_depth_linear,
 					g_tex_velocity, g_tex_depth_hi,
 					g_tex_velocity_hi, g_tex_normal,
 					g_tex_out, reset);
@@ -1045,7 +1057,7 @@ void I_FinishUpdate(void)
 		    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
 		    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 	    barrier(g_tex_out, &g_st_out, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	    used_ngx = Ngx_Evaluate(g_cmd, g_tex_color, g_tex_depth,
+	    used_ngx = Ngx_Evaluate(g_cmd, g_tex_color, g_tex_depth, g_tex_depth_linear,
 				    g_tex_velocity, g_tex_normal, g_tex_out,
 				    reset);
 	}
@@ -1172,6 +1184,7 @@ void I_ShutdownGraphics(void)
     if (g_up_velocity) ID3D12Resource_Release(g_up_velocity);
     if (g_up_normal) ID3D12Resource_Release(g_up_normal);
     if (g_up_depth) ID3D12Resource_Release(g_up_depth);
+    if (g_up_depth_linear) ID3D12Resource_Release(g_up_depth_linear);
     if (g_up_color) ID3D12Resource_Release(g_up_color);
     if (g_tex_velocity_hi) ID3D12Resource_Release(g_tex_velocity_hi);
     if (g_tex_depth_hi) ID3D12Resource_Release(g_tex_depth_hi);
@@ -1180,6 +1193,7 @@ void I_ShutdownGraphics(void)
     if (g_tex_velocity) ID3D12Resource_Release(g_tex_velocity);
     if (g_tex_normal) ID3D12Resource_Release(g_tex_normal);
     if (g_tex_depth) ID3D12Resource_Release(g_tex_depth);
+    if (g_tex_depth_linear) ID3D12Resource_Release(g_tex_depth_linear);
     if (g_tex_color) ID3D12Resource_Release(g_tex_color);
     if (g_bb[0]) ID3D12Resource_Release(g_bb[0]);
     if (g_bb[1]) ID3D12Resource_Release(g_bb[1]);
@@ -1191,6 +1205,7 @@ void I_ShutdownGraphics(void)
     if (g_fence_ev) CloseHandle(g_fence_ev);
     if (g_dev) ID3D12Device_Release(g_dev);
     g_readback = g_up_present = g_up_velocity = g_up_normal = g_up_depth = g_up_color = NULL;
+    g_up_depth_linear = g_tex_depth_linear = NULL;
     g_up_velocity_hi = g_up_depth_hi = g_up_color_hi = NULL;
     g_tex_out = g_tex_velocity = g_tex_normal = g_tex_depth = g_tex_color = NULL;
     g_tex_velocity_hi = g_tex_depth_hi = g_tex_color_hi = NULL;
@@ -1282,6 +1297,19 @@ void I_InitGraphics(void)
 	Ngx_Init(g_dev, g_queue);
     else
         fprintf(stderr, "NGX disabled: sr_switch=off (-nodlss/-nosr), renderer continues\n");
+    if (Ngx_WantsLinearDepth()) {
+        g_st_depth_linear = D3D12_RESOURCE_STATE_COPY_DEST;
+        g_tex_depth_linear = make_tex(GB_WIDTH, GB_HEIGHT, DXGI_FORMAT_R32_FLOAT,
+                                     D3D12_RESOURCE_FLAG_NONE, g_st_depth_linear,
+                                     L"GB_LinearDepthLegacyRR");
+        g_up_depth_linear = make_upload(upload_bytes(GB_WIDTH, GB_HEIGHT, 4));
+        if (!g_tex_depth_linear || !g_up_depth_linear) {
+            if (g_tex_depth_linear) ID3D12Resource_Release(g_tex_depth_linear);
+            if (g_up_depth_linear) ID3D12Resource_Release(g_up_depth_linear);
+            g_tex_depth_linear = g_up_depth_linear = NULL;
+            fprintf(stderr, "NGX: legacy RR linear-depth allocation failed; SR fallback retained\n");
+        }
+    }
     if (Ngx_WantsHiRes() && !init_hi_res())
 	I_Error("NGX hi-res G-buffers failed");
     if (!Ngx_Ready() && Fsr2_Wanted())

@@ -23,3 +23,13 @@ int GB_ProjectMotion(const GB_FrameInputs *current, const GB_FrameInputs *previo
     motion[0] = prev[0] - cur[0]; motion[1] = prev[1] - cur[1];
     return 1;
 }
+
+float GB_DeviceDepthFromViewDepth(float view_depth, int scene_valid)
+{
+    const double near_z = GB_TEMPORAL_NEAR, far_z = GB_TEMPORAL_FAR;
+    if (!scene_valid || !isfinite(view_depth) || view_depth <= 0.0f) return 1.0f;
+    if (view_depth <= near_z) return 0.0f;
+    if (view_depth >= far_z) return 1.0f;
+    return (float)(far_z / (far_z - near_z) -
+                   far_z * near_z / ((far_z - near_z) * view_depth));
+}

@@ -13,14 +13,15 @@ int  Ngx_Init(void *device, void *queue);
 void Ngx_Shutdown(void);
 int  Ngx_Ready(void);
 int  Ngx_WantsHiRes(void);
+int  Ngx_WantsLinearDepth(void);
 int  Ngx_ShowEvalOutput(void);
 int  Ngx_Evaluate(void *cmdlist,
-		  void *color, void *depth, void *velocity, void *normal,
+		  void *color, void *depth, void *linear_depth, void *velocity, void *normal,
 		  void *output, int reset);
 /* SR 320→1280 (preset L) then DLAA/NR on that color. depth_hi/vel_hi
    are nearest 4x; color for pass 2 is the SR output, never nearest. */
 int  Ngx_EvaluateStack(void *cmdlist,
-		       void *color, void *depth, void *velocity,
+		       void *color, void *depth, void *linear_depth, void *velocity,
 		       void *depth_hi, void *velocity_hi, void *normal,
 		       void *output, int reset);
 

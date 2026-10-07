@@ -685,6 +685,7 @@ int Ngx_Init(void *device, void *queue)
     fprintf(stderr, "NGX build: failure_diagnostics=disabled\n");
 #endif
     fprintf(stderr, "NGX request: feature=%s input=320x200 output=1280x800 preset_request=%s sr_switch=on\n", g_want_rr ? "RR" : "SR", g_mode == NGX_MODE_K ? "K" : (g_want_rr ? "RR-default" : "L"));
+    fprintf(stderr, "NGX input depth: SR/DLAA R32_FLOAT conventional device-Z near=0 far=1 view_planes=%.0f/%.0f depth_inverted=0; legacy RR uses separate linear view-depth\n", GB_TEMPORAL_NEAR, GB_TEMPORAL_FAR);
     if (!NgxRuntime_Prepare(path))
     {
         g_failure = "local-runtime-unavailable";
@@ -751,6 +752,11 @@ int Ngx_Ready(void)
 int Ngx_WantsHiRes(void)
 {
     return g_inited && g_stack && !g_want_rr && !g_dlaa_failed;
+}
+
+int Ngx_WantsLinearDepth(void)
+{
+    return g_inited && g_want_rr;
 }
 
 int Ngx_ShowEvalOutput(void)
@@ -883,7 +889,7 @@ static int ngx_eval_rr(ID3D12GraphicsCommandList *cl,
     return 1;
 }
 
-int Ngx_Evaluate(void *cmdlist, void *color, void *depth, void *velocity,
+int Ngx_Evaluate(void *cmdlist, void *color, void *depth, void *linear_depth, void *velocity,
 		 void *normal, void *output, int reset)
 {
     ID3D12GraphicsCommandList *cl = (ID3D12GraphicsCommandList *)cmdlist;
@@ -899,16 +905,18 @@ int Ngx_Evaluate(void *cmdlist, void *color, void *depth, void *velocity,
 
     if (g_using_rr)
     {
-	if (ngx_eval_rr(cl, (ID3D12Resource *)color, (ID3D12Resource *)depth,
+	if (linear_depth && ngx_eval_rr(cl, (ID3D12Resource *)color, (ID3D12Resource *)linear_depth,
 			(ID3D12Resource *)velocity, (ID3D12Resource *)normal,
 			(ID3D12Resource *)output, reset))
 	    return 1;
+        if (!linear_depth) fprintf(stderr, "NGX: legacy RR linear-depth resource unavailable, falling back to SR preset K\n");
 	ngx_fallback_sr_k();
 	if (!ngx_create_feature(cl))
 	{
 	    g_inited = 0;
 	    return 0;
 	}
+        reset = 1;
     }
 
     return ngx_eval_sr(cl, (ID3D12Resource *)color, (ID3D12Resource *)depth,
@@ -927,7 +935,7 @@ static void ngx_copy_mid_to_out(ID3D12GraphicsCommandList *cl,
     ngx_barrier(cl, output, &out_st, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 }
 
-int Ngx_EvaluateStack(void *cmdlist, void *color, void *depth, void *velocity,
+int Ngx_EvaluateStack(void *cmdlist, void *color, void *depth, void *linear_depth, void *velocity,
 		      void *depth_hi, void *velocity_hi, void *normal,
 		      void *output, int reset)
 {
@@ -937,7 +945,7 @@ int Ngx_EvaluateStack(void *cmdlist, void *color, void *depth, void *velocity,
     if (!g_inited || !cl || !color || !depth || !velocity || !output)
 	return 0;
     if (!depth_hi || !velocity_hi)
-	return Ngx_Evaluate(cmdlist, color, depth, velocity, normal,
+	return Ngx_Evaluate(cmdlist, color, depth, linear_depth, velocity, normal,
 			    output, reset);
     if (!ngx_create_feature(cl))
     {
@@ -946,7 +954,7 @@ int Ngx_EvaluateStack(void *cmdlist, void *color, void *depth, void *velocity,
 	return 0;
     }
     if (g_using_rr)
-	return Ngx_Evaluate(cmdlist, color, depth, velocity, normal,
+	return Ngx_Evaluate(cmdlist, color, depth, linear_depth, velocity, normal,
 			    output, reset);
 
     if (g_dlaa_failed ||
@@ -1027,17 +1035,23 @@ int Ngx_WantsHiRes(void)
     return 0;
 }
 
+int Ngx_WantsLinearDepth(void)
+{
+    return 0;
+}
+
 int Ngx_ShowEvalOutput(void)
 {
     return 0;
 }
 
-int Ngx_Evaluate(void *cmdlist, void *color, void *depth, void *velocity,
+int Ngx_Evaluate(void *cmdlist, void *color, void *depth, void *linear_depth, void *velocity,
 		 void *normal, void *output, int reset)
 {
     (void)cmdlist;
     (void)color;
     (void)depth;
+    (void)linear_depth;
     (void)velocity;
     (void)normal;
     (void)output;
@@ -1045,13 +1059,14 @@ int Ngx_Evaluate(void *cmdlist, void *color, void *depth, void *velocity,
     return 0;
 }
 
-int Ngx_EvaluateStack(void *cmdlist, void *color, void *depth, void *velocity,
+int Ngx_EvaluateStack(void *cmdlist, void *color, void *depth, void *linear_depth, void *velocity,
 		      void *depth_hi, void *velocity_hi, void *normal,
 		      void *output, int reset)
 {
     (void)cmdlist;
     (void)color;
     (void)depth;
+    (void)linear_depth;
     (void)velocity;
     (void)depth_hi;
     (void)velocity_hi;

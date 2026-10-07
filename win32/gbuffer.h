@@ -27,6 +27,8 @@ enum
 
 #define GB_WIDTH   320
 #define GB_HEIGHT  200
+#define GB_TEMPORAL_NEAR 1.0f
+#define GB_TEMPORAL_FAR  8192.0f
 
 /* Coordinates are (DOOM X, height, DOOM Y), in map units.  Screen positions
  * and motion are full 320x200-buffer pixels, including the viewport offset.
@@ -73,6 +75,9 @@ int GB_SampleWorldPosition(int screen_x, int screen_y, float world[3]);
 int GB_ProjectMotion(const GB_FrameInputs *current, const GB_FrameInputs *previous,
                      const float current_world[3], const float previous_world[3],
                      float motion[2]);
+/* Conventional perspective device Z: near0, far1, no depth-inverted flag.
+ * Invalid pixels use far1. Raw world reconstruction continues using GB_Depth. */
+float GB_DeviceDepthFromViewDepth(float view_depth, int scene_valid);
 
 void GB_Init(void);
 void GB_Shutdown(void);
@@ -107,6 +112,7 @@ const unsigned char *GB_OverlayRGBA(void);
 const unsigned char *GB_SceneMask(void);
 const unsigned char *GB_OverlayMask(void);
 const float         *GB_Depth(void);
+const float         *GB_TemporalDepth(void);
 const unsigned char *GB_NormalRGBA(void);
 const float         *GB_VelocityRG(void);
 

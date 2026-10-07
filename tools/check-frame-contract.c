@@ -4,6 +4,13 @@
 #include <math.h>
 #include "gbuffer.h"
 static int failures;
+static void depth_check(const char *name, float view_depth, int valid, float expected)
+{
+    float actual = GB_DeviceDepthFromViewDepth(view_depth, valid);
+    int ok = isfinite(actual) && fabsf(actual - expected) < 0.000001f;
+    printf("%s: %s (%.9f) expected (%.9f)\n", name, ok ? "PASS" : "FAIL", actual, expected);
+    if (!ok) failures++;
+}
 static void check(const char *name, const GB_FrameInputs *current, const GB_FrameInputs *previous,
                   const float world[3], float x, float y)
 {
@@ -35,5 +42,30 @@ int main(void)
     check("45 degree left turn",&current,&previous,world,-160,(float)(40*sqrt(2.0)-40));
     current=previous;current.base.position[0]=8;world[2]=16;
     check("forward translation includes depth",&current,&previous,world,160*16.0f/56-40,160*16.0f/56-40);
+    depth_check("device depth near endpoint",1,1,0);
+    depth_check("device depth far endpoint",8192,1,1);
+    depth_check("device depth reciprocal perspective mapping",2,1,4096.0f/8191);
+    depth_check("device depth is not normalized linear view distance",64,1,8064.0f/8191);
+    depth_check("positive depth before near clamps near",0.5f,1,0);
+    depth_check("depth beyond far clamps far",16384,1,1);
+    depth_check("zero invalid depth is far",0,1,1);
+    depth_check("negative invalid depth is far",-1,1,1);
+    depth_check("non-scene depth is far",64,0,1);
+    depth_check("NaN depth is far",NAN,1,1);
+    depth_check("infinite depth is far",INFINITY,1,1);
+    {
+        float values[] = {1,2,8,64,128,512,2048,4096,8192};
+        float previous_depth = -1;
+        int i, ok = 1;
+        for (i = 0; i < (int)(sizeof(values)/sizeof(values[0])); i++) {
+            float d = GB_DeviceDepthFromViewDepth(values[i],1);
+            double inverse = GB_TEMPORAL_NEAR * GB_TEMPORAL_FAR /
+                (GB_TEMPORAL_FAR - d * (GB_TEMPORAL_FAR - GB_TEMPORAL_NEAR));
+            if (d <= previous_depth || fabs(inverse-values[i])/values[i] > 0.0003) ok = 0;
+            previous_depth = d;
+        }
+        printf("device depth monotonic and perspective inverse: %s\n", ok ? "PASS" : "FAIL");
+        if (!ok) failures++;
+    }
     return failures ? 1 : 0;
 }
