@@ -186,6 +186,7 @@ extern "C" void DxrLighting_Init(void *device,unsigned width,unsigned height) {
 extern "C" void DxrLighting_RequestEnabled(int enabled) {
     bool requested=enabled!=0&&state.configured;
     if(requested==state.requested)return;
+    if(requested)RtMaterials_RetryUnavailable();
     state.requested=requested;state.failed=false;state.active=false;
     state.reason=requested?"pending-scene":"disabled";DxrMap_RequestScene(requested);GB_RequestResetReason(GB_RESET_EXPLICIT);
 }

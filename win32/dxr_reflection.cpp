@@ -174,6 +174,7 @@ extern "C" void DxrReflection_Init(void *device,unsigned width,unsigned height) 
 }
 extern "C" void DxrReflection_RequestEnabled(int enabled) {
  bool requested=enabled!=0&&state.configured;if(requested==state.requested)return;
+ if(requested)RtMaterials_RetryUnavailable();
  state.requested=requested;state.active=state.history_reset=false;state.failed=false;
  state.reason=requested?"pending-scene":"disabled";DxrMap_RequestSceneFor(DXR_MAP_CONSUMER_REFLECTION,requested);GB_RequestResetReason(GB_RESET_EXPLICIT);
 }
