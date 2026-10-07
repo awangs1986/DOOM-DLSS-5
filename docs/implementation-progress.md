@@ -22,15 +22,23 @@
 
 - #15 指定材质的屏幕外单次反射已合并 `a3c699b`。实测源 `79055b0` 的 51 次 RTX 运行正常退出；精确几何法线、原始纹理／alpha／活动调色板、动态门／平台反射命中与 SR 组合已独立核对。203 个编译输入匹配，集成非文档源码与该版本一致。实机 client 图仅作外观证据，完整窗口 HUD 布局由 #16／#17 继续验收。详见 `docs/dxr-reflection.md`。
 
-## 正在实施
+- #16 已按用户最新 NR 验证豁免范围接受，并通过 `a10e04824e21ab8db5768facc66b5ba2fa78adb5` 合并批准菜单 HEAD `9ec83e1cdbcd2aa9240abb3d11d544476fa5690d`。实测 runtime 源为 `9c762acf1a237d9e91ff089e29da1f87dd04626a`，其后为文档更新；native v5 的 316 个输入与 exe 身份已独立核对。根代理 `root-menu-final-rt-sr-data-review.json` 复核 12 条非 DLSS5-only 路线、267 个 paired actions、534 个 WM 事件、93 张 captures、46 次单项转换首应用帧 reset bit 512，以及 8 条同 tic 故障对照，全部记录哈希匹配。根代理实际查看 RT＋SR active 菜单、缺 DLL 后恢复 SR、缺 RT shader 后恢复 RT 菜单及固定 tic RT 画面，确认清晰且 HUD 完整。NR 原验证项由用户豁免，仍未验证，不标 PASS。详见 `docs/graphics-menu-validation.md`。
+- #16 HUD 稳定性由 `root-menu-layout-v5-stable-baseline-review.json` 独立核对：以正常 post-close 图为基准，后续 layout 6 图与 warning 3 图的 face 外 HUD 差异为 0。初始 frame 39／34 均为 tic 1、scene 0，不能宣称最初差异为 0；其中 656 个输出像素为原武器栏首次／重复透明背景刷新差异，其余初始差异为 wipe 黑区。初始红例与后续稳定证据分别保留。
+- 合并后按批准菜单 HEAD 核对其 292 个 tracked 非 docs 文件（排除 `AGENTS.md` 及中文包），blob 与模式全部一致；集成额外非 docs 文件仅 `languages/zh-cn.ini`，93 个中文译文及现有 NR 豁免规格／任务修订均保留。
 
-1. #16：已开放实施，从 `a3c699b` 创建独立工作树，实现游戏菜单 RT、SR、DLSS5／DLSSNR 三个独立请求、偏好保存、真实状态、安全切换及失败回退；SR 失败须保留已合成 RT 画面。
-   - 菜单候选已完成原版和 NGX 两种 Windows 原生构建，独立请求、profile sidecar 和可选 NR 控制仍在独立工作树，尚未合并或宣称菜单通过。
-   - 首轮真实 SendInput 菜单验收失败。观察源 `36114a8` 的按键日志证实快速成对和保持按键的字母／Enter 都变成 `VK_PROCESSKEY`，30 个窗口事件中有 11 个此类按下事件，未产生图形请求；原始失败画面和日志保留。只调整游戏自身 HWND 的 IME 关联后，需重新构建及复测，不修改系统输入法设置。
-   - 实际窗口超出 workarea 并裁剪底部 HUD；引擎导出包含完整 HUD。窗口 DPI／尺寸修复与输入修复分别验证，不能将旧截图当完整窗口通过证据。
-   - 此前一轮 owner 报告：精确源 `9c762ac` 的 13 次菜单矩阵运行均正常退出，8 个故障对照与 2 次窗口布局运行已完成；游戏 HWND 的 IME 输入修复与窗口修复已有分别取得的证据。当时结果已下载 Linux，Windows 测试轮次已收尾，用户可以关机，该轮不再启动远端。根代理完整复核与菜单合并仍待，当前不能标记最终 PASS；以上首轮失败日志和裁剪画面仍保留。
-2. #17：干净打包、图形菜单语言键、真实键盘菜单操作、完整 RTX 组合及最终独立验收与审查。
-3. 中文语言包翻译已按用户 2026-10-07 的要求提前完成；实际 CJK 显示补充任务 `docs/chinese-display-task.md` 已纳入本轮剩余工作，仍待实施与验收。#17 初始首版边界保留其历史意义，CJK 作为后续扩展交付；按最新 NR 验证豁免范围继续其他图形最终验收，完整规格交付仍未完成，PR18 保持 draft。
+## #16 实施历史与证据
+
+#16 此前从 `a3c699b` 创建独立工作树，实现游戏菜单 RT、SR、DLSS5／DLSSNR 三个独立请求、偏好保存、真实状态、安全切换及失败回退；SR 失败须保留已合成 RT 画面。以下记录保留当时状态，不替代上面的最新接受结论。
+
+- 菜单候选当时已完成原版和 NGX 两种 Windows 原生构建，独立请求、profile sidecar 和可选 NR 控制仍在独立工作树，尚未合并或宣称菜单通过。
+- 首轮真实 SendInput 菜单验收失败。观察源 `36114a8` 的按键日志证实快速成对和保持按键的字母／Enter 都变成 `VK_PROCESSKEY`，30 个窗口事件中有 11 个此类按下事件，未产生图形请求；原始失败画面和日志保留。当时只调整游戏自身 HWND 的 IME 关联后，需重新构建及复测，不修改系统输入法设置。
+- 实际窗口当时超出 workarea 并裁剪底部 HUD；引擎导出包含完整 HUD。窗口 DPI／尺寸修复与输入修复分别验证，不能将旧截图当完整窗口通过证据。
+- 此前一轮 owner 报告：精确源 `9c762ac` 的 13 次菜单矩阵运行均正常退出，8 个故障对照与 2 次窗口布局运行已完成；游戏 HWND 的 IME 输入修复与窗口修复已有分别取得的证据。当时结果已下载 Linux，Windows 测试轮次已收尾，用户可以关机，该轮不再启动远端。当时根代理完整复核与菜单合并仍待，未标记最终 PASS；以上首轮失败日志和裁剪画面仍保留。
+
+## 下一轮实施
+
+1. #17：从本次已接受菜单的集成 HEAD 建立独立工作树，继续干净打包、图形菜单语言键、真实键盘菜单操作、RT／SR 组合及最终独立验收与审查；NR／DLSS5 验证按用户豁免执行。
+2. 实际 CJK 显示：从同一集成 HEAD 建立另一独立工作树，按 `docs/chinese-display-task.md` 实施并验收。中文译文已完成，字体及实际显示仍待；#17 初始首版边界保留其历史意义，CJK 作为后续扩展交付。用户已确认 RTX 电脑继续开机并授权下一轮，其余最终 GPU 验收、完整规格交付与独立审查仍待完成，PR18 保持 draft。
 
 ## 兼容与状态边界
 
@@ -47,6 +55,7 @@ DLSS5／DLSSNR 是神经渲染增强，分别于 SR、DLAA、RR 记录身份和�
 - Draft PR：https://github.com/awangs1986/DOOM-DLSS-5/pull/18 。GitHub 认证此前曾恢复，#1／#16／#17 菜单与 NR 修订已同步；2026-10-07 本次推送返回 `Invalid username or token`，当前凭据再次失效。`gh` wrapper 的认证状态及移除 `GH_TOKEN` 后 `local/bin/gh` 的保存认证均确认 invalid；本次未登录、注销或重复推送。
 - 本次中文翻译合并 `f096136cc3efdabd1deebc5663c7f09d3860328e` 与进度记录 `e930b7ae7d230352ad8c4776a306e90cd9b29d9c` 已保存在本地，尚未推送。本次凭据失效记录更新前的进度文档备份：`/home/awang/tmp/doom-implementation-g6ir9es3/implementation-progress-before-auth-failure-20261007-VAKOlb.md`。
 - 本次范围修订前 HEAD：`f107cd0d7f627742949667f5cec503d493b8fdab`；规格、#16／#17 任务及进度原文已备份到 `/home/awang/tmp/doom-implementation-g6ir9es3/docs-before-scope-revision-20261007-FvAoho/`。本次 NR 验证豁免及实际中文显示补充任务先本地保存，GitHub 凭据仍失效，待同步。
+- 本次菜单接受记录更新前集成 HEAD：`a10e04824e21ab8db5768facc66b5ba2fa78adb5`；进度原文备份：`/home/awang/tmp/doom-implementation-g6ir9es3/implementation-progress-before-menu-merge-20261007-H5vCco.md`。菜单合并及本次进度记录仍仅本地保存，未推送。
 - 规格：`docs/dlss-rt-language-spec.md`；菜单任务：`docs/tasks/16-rt-sr-menu.md`、`docs/tasks/17-packaging-menu-acceptance.md`。
 - 协调与完整证据：`/home/awang/tmp/doom-implementation-g6ir9es3/`。
 - 当前 #15 交付入口：`reflection-result.md`、`root-reflection-v6-all51-ledger-review.json` 及 main／extra／dynamic／source／native 独立复核；#13 交付入口：`dynamic-result.md`、`root-dynamic-matrix03-review.json`、`root-dynamic-followup-review-20261007.json`；#16／#17 准备入口：`menu-frontier-implementation-notes.md`、`existing-swapper-menu-plan.md`。
