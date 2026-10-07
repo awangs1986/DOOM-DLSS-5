@@ -12,7 +12,7 @@ vertex_t *vertexes;sector_t *sectors;side_t *sides;line_t *lines;seg_t *segs;sub
 fixed_t *textureheight;int *texturetranslation;int skyflatnum;
 int main(void)
 {
- sector_t sector={0};side_t side={0};fixed_t heights[1]={64*FRACUNIT};int translation[1]={0};
+ sector_t sector={0};side_t side={0};fixed_t heights[2]={64*FRACUNIT,64*FRACUNIT};int translation[2]={0,1};
  MapWorldRevision initial,changed;MapMesh mesh={0};MapSurface surface={0};MapMeshVertex vertices[3]={0};uint32_t indices[3]={0,1,2},triangle=0;
  numsectors=numsides=1;sectors=&sector;sides=&side;textureheight=heights;texturetranslation=translation;skyflatnum=99;
  sector.floorheight=0;sector.ceilingheight=128*FRACUNIT;sector.lightlevel=160;
@@ -34,5 +34,8 @@ int main(void)
  puts("PASS same-generation base material changes referenced-material revision");
  initial=changed;sector.ceilingpic=skyflatnum;assert(MapSource_Survey(&changed));assert(initial.geometry!=changed.geometry&&initial.material!=changed.material);
  puts("PASS sky topology classification changes geometry and material references");
+ initial=changed;side.midtexture=1;assert(MapSource_Survey(&changed));
+ assert(initial.geometry!=changed.geometry&&initial.material!=changed.material&&initial.mapping==changed.mapping);
+ puts("PASS equal-height MID activation invalidates geometry and material references");
  return 0;
 }

@@ -1,4 +1,4 @@
-/* Owned, immutable static-map snapshot; map XY is converted to world X,height,Y.
+/* Owned current-map snapshot; map XY is converted to world X,height,Y.
    No engine/WAD pointers survive Build. GPLv2; see LICENSE.TXT. */
 #ifndef WINDOOM_MAP_MESH_H
 #define WINDOOM_MAP_MESH_H

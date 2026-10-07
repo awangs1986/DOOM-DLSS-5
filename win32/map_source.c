@@ -83,6 +83,8 @@ int MapSource_Survey(MapWorldRevision *r)
  }
  for(i=0;i<numsides;i++){
   int ids[3]={sides[i].midtexture,sides[i].toptexture,sides[i].bottomtexture};
+  /* MID activation changes masked topology even at equal texture heights. */
+  revision_word(&r->geometry,ids[MAP_WALL_MID]>0);
   revision_word(&r->mapping,sides[i].textureoffset);revision_word(&r->mapping,sides[i].rowoffset);
   for(j=0;j<3;j++){
    revision_word(&r->material,ids[j]);
