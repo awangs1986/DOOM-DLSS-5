@@ -15,7 +15,7 @@ Shader Model 6.5 和 DXC；官方 DLSS 需要受支持的 NVIDIA RTX/驱动。�
 `374959484e79a640feaba44c93ac8cfb0a03f5b5`；SR DLL 文件版本为310.9.1.0。
 SDK 发布号、DLL 文件版本、预设和功能分别记录，不能由版本名推断 NR 执行。
 
-每个目录包含程序、语言、默认光源/材质及已构建的五个 DXR shader；NGX 目录
+每个目录包含程序、语言、`zh-cn.cjk` 字体及 `FONT-OFL-1.1.txt` 许可、默认光源/材质及已构建的五个 DXR shader；NGX 目录
 按实际 SR/RR 功能部署官方 DLL 和 ngx.mode；Anime4K 包含其独立 shader。
 未安装 DXC 时普通显示仍可用，但 RT 缺 shader 必须明确回退，不算完整 RT 包。
 default effect 文件只在不存在时复制，重新 staging 不覆盖玩家已编辑的配置。
@@ -48,13 +48,15 @@ RT 默认关闭。修改灯的位置、强度或纹理材质后重启加载，�
 
 ## 语言
 
-`-lang es-ascii` 是原字体可显示的西班牙语示例；`-lang en` 是内建英文。
+`-lang es-ascii` 是原字体可显示的西班牙语示例；`-lang en` 是内建英文；
+`-lang zh-cn` 使用随包部署的 12px 中文位图，覆盖当前中文包的 289 个非 ASCII 码点。
+中文字体缺失、损坏或不覆盖译文时整包回退英文并记录原因；不依赖系统安装字体。
 语言选择优先级为明确 CLI → exe 旁 language.cfg → 英文。成功显式选择保存，
 坏包回退英文且不改原选择；语言只启动时加载，重新选择需重启。语言偏好位置
 与图形 profile 不同，不能把它们混为一个配置文件。
 缺键逐字段英文，坏 schema/重复键/非法 UTF-8/超限整体英文；字体、长文字及
-已迁移键见 [语言包](language-packs.md)。中文包与实际字体扩展的部署、许可和
-验收由 [中文显示任务](chinese-display-task.md) 及其最终交付记录说明。
+已迁移键见 [语言包](language-packs.md)。中文包与实际字体扩展的部署及许可见
+[中文字体](chinese-font.md)，实际画面以最终集成验收记录为准。
 
 ## DLSS5／NR 验证范围
 
