@@ -44,11 +44,21 @@
 - 源 `319e0c5` 的失败／恢复八进程：112 pairs、224 WM、42 captures、12 次同帧 reset512；四种 synthetic SR API 失败和缺 DLL 的十张 tic70／175 PNG 与 native RT 基准字节及全 RGB 完全相同，RT 反射仍执行。真实 DLL／shader 恢复后 RT／SR active，WARP 显示 no_dxr 且游戏可继续。synthetic 结果不称真实硬件故障，WARP 不称硬件性能。复核材料：`root-packaging-failures-v1-data-review.json`；两组 normalized 的 479 文件与原始 ZIP 全部相同。
 - 用户指定 `gpt-6-luna` 的中文消费者及字体已合并：289 个非 ASCII 码点、12×12 稀疏位图、完整 OFL 许可、严格格式／CRC／覆盖校验和整体英文回退；英文保持原字体路径。根独立运行 font loader、实际 menu／pickup／HUD／prompt consumer、实际 blitter 和 fresh-process startup 测试均通过 ASan／UBSan。HUD 12px 擦除缺口已修复并新增清空后完整擦除的断言。字体 SHA-256 为 `85723080bc39beab24796438f56c3a924ac5ebe4727b05a07e1db1300b96cfb3`。复核材料：`root-cjk-final-source-review.json`。以上 CPU／源码证据不替代实际中文可读性证据。
 
+## 最终源码、原生构建与审查
+
+最终 runtime 源更新为 `00e0d5a65389a8e4ebbe6900bbfb9bc0447dc692`。原 `e24ba886` 的 Windows v4 编译完成，但资源门槛发现 `build.cmd` 只复制 INI，漏 `zh-cn.cjk`／OFL；该轮未启动游戏，保留 `packaging-17-build-result-v4-red.json` 与编译日志。已合并最小 staging 修复 `a47aa0a`，以及当前 CJK 部署说明 `251a7f3`，CMake 原有目录复制无需修改。
+
+规格审查发现共享材质 Create／Map 的暂时失败缓存不会因 RT off／on 清除。修复 `fce03e7` 和诊断 ABI／测试补充 `d7ec73f` 只在效果实际 false→true 时清除失败签名，不释放借用资源，也不在每帧重试。根代理实际运行公开 `RtMaterials` API 的 diagnostics OFF／ON ASan／UBSan 回归：分配／初始 Map／metadata Map 失败抑制、相同场景明确重试、健康资源保留、单次故障生命周期及安全收尾通过。实际键盘菜单的两种效果路线恢复仍待实机证据，不能仅凭测试关闭该运行验收项。
+
+精确源 `00e0d5a6` 的 fresh Windows v5 已通过：330 个 Git／archive／manifest 及实际构建输入完全匹配；四次实际编译／链接包含全部改动的消费者和 RT 单元；七目录 105 部署条目均带 8128-byte CJK 字体及完整 OFL。五个 SR／RR DLL 条目的哈希匹配此前固定 x64、Valid Authenticode 回执，当前 PE 文件版本规范化为 `310.9.1.0`；RR DLL 仅在 RR 目录。编译日志有 2020 条 warning diagnostics，无 error diagnostics，不声明 warning-free。独立记录为 `root-packaging-v5-source-review.json`、`root-packaging-native-v5-review.json`。
+
+三个审查方向已固定 `00e0d5a6`：Standards 0 硬性违反、3 项无实际缺陷的维护建议；Spec 原 P2 已修，0 已确认未解决源码问题；Security 五类检查未发现可证实的可利用问题。报告位于协调目录 `final-standards-review-00e0d5a.md`、`final-spec-review-00e0d5a.md`、`final-security-review-f333560.md`（正文固定最新源）。安全结论限定源码和本地依赖一致性，未查询漏洞公告，不是完整安全审计；三份报告均不替代最终运行验收。
+
 ## 正在实施
 
-1. #17 owner 独占 RTX 桌面，对精确 runtime 源 `e24ba886` fresh 构建全部七目录，实际启动六个非 DLSS5 模式；检查随包字体／许可与英文相同 demo 的 12 张逐像素对照。
+1. #17 owner 独占 RTX 桌面，使用已通过 fresh 构建的精确 runtime 源 `00e0d5a6`，实际启动六个非 DLSS5 模式；检查英文相同 demo 的 12 张逐像素对照及实际菜单恢复。
 2. 真实键盘中文／西语消费者、缺／坏字体整体回退、长理由与偏好 warning、同进程存读档／换关／传送、RT off 改世界再 on，以及动态／alpha／sky／屏外反射关键帧仍待最终集成实测。DLSS5／NR 验证继续按用户豁免执行。
-3. 所有剩余验收完成后固定源码，进行独立 Standards／Spec／Security 审查及必要修复。PR18 保持 draft，GitHub 凭据失效导致新提交仍只本地保存；不把外部同步失败称工程完成，也不提前声明最终实机通过。
+3. 所有剩余验收完成后核对审查源与最终产物，若运行发现新缺陷，则修复、重建并复审增量；交付七目录离线包、许可、版本／哈希及逐项证据。PR18 保持 draft，GitHub 凭据失效导致新提交仍只本地保存，不提前声明最终实机通过。
 
 ## 兼容与状态边界
 
