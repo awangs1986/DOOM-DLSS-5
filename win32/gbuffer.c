@@ -443,6 +443,7 @@ void GB_SetMaterialContext(int kind, unsigned int id)
 {
     gb_material_kind=kind; gb_material_id=id;
 }
+int GB_MaterialContextKind(void) { return gb_material_kind; }
 void GB_RecordMaterialSample(int offset, unsigned char source, unsigned char ambient)
 {
     GB_MaterialSample *sample;

@@ -38,6 +38,7 @@ typedef struct {
     unsigned int material_id;
 } GB_MaterialSample;
 void GB_SetMaterialContext(int kind, unsigned int material_id);
+int GB_MaterialContextKind(void);
 void GB_RecordMaterialSample(int screen_offset, unsigned char source_index,
                             unsigned char ambient_index);
 const GB_MaterialSample *GB_MaterialSamples(void);

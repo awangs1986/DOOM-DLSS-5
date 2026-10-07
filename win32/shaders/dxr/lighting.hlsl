@@ -1,5 +1,6 @@
 // One deterministic point light, at most one opaque visibility ray per receiver.
 #include "scene-hit.hlsli"
+#include "rt-material-layout.hlsli"
 RaytracingAccelerationStructure scene : register(t0);
 struct Sample {
  float3 position; uint flags;
@@ -9,17 +10,29 @@ struct Sample {
 StructuredBuffer<Sample> samples : register(t1);
 // Active raw PLAYPAL RGB in low bytes, classic gamma channel LUT in high byte.
 StructuredBuffer<uint> palette : register(t2);
+StructuredBuffer<ScenePrimitive> primitives : register(t3);
+StructuredBuffer<SceneGeometryRange> geometryRanges : register(t4);
+StructuredBuffer<SceneVertex> vertices : register(t5);
+StructuredBuffer<uint> indices : register(t6);
+StructuredBuffer<RtMaterialSurface> materialSurfaces : register(t7);
+StructuredBuffer<RtMaterialDescriptor> materialDescriptors : register(t8);
+StructuredBuffer<uint> materialPixels : register(t9);
+#include "alpha-trace.hlsli"
 RWStructuredBuffer<uint> pixels : register(u0);
 struct Result {
  float3 position; uint flags;
  float distance; float cosine; uint visible; uint original;
  uint finalColor; uint sourceAmbient; uint material; uint kind;
+ uint traceStatus,steps,alphaChecks,alphaRejected;
+ uint candidateSurface,candidateAlpha;float2 candidateUV;
 };
 RWStructuredBuffer<Result> results : register(u1);
+RWStructuredBuffer<float4> linearRGB : register(u2);
 cbuffer Light : register(b0) {
  float3 lightPosition; uint shadowEnabled;
  float3 lightColor; float intensity;
  float radius; uint width; uint height; uint rowWords;
+ RtTraceBounds traceBounds;uint opaqueDiagnostic,alphaDebug;uint2 pad;
 };
 float3 decode(float3 v) {
  return float3(v.x<=0.04045?v.x/12.92:pow((v.x+0.055)/1.055,2.4),
@@ -34,16 +47,10 @@ uint encodeChannel(float v) {
 uint encode(float3 v) {
  return encodeChannel(v.r)|(encodeChannel(v.g)<<8)|(encodeChannel(v.b)<<16)|0xff000000;
 }
-bool visible(float3 p,float3 n,float3 direction,float distance) {
+RtTraceResult visibility(float3 p,float3 n,float3 direction,float distance) {
  RayDesc ray;ray.Origin=p+n*0.03125;ray.Direction=direction;
  ray.TMin=0.03125;ray.TMax=max(0.03125,distance-0.0625);
- RayQuery<RAY_FLAG_FORCE_OPAQUE|RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> query;
- query.TraceRayInline(scene,RAY_FLAG_NONE,0xff,ray);
- // Force-opaque static triangles produce no material candidates. Bound future
- // candidate traversal too; exhaustion is conservative blockage, never leakage.
- bool exhausted=true;
- for(uint i=0;i<64;i++) if(!query.Proceed()) {exhausted=false;break;}
- return !exhausted && query.CommittedStatus()==COMMITTED_NOTHING;
+ return TraceAccepted(ray,traceBounds,true,opaqueDiagnostic!=0);
 }
 [numthreads(8,8,1)]
 void main(uint3 thread:SV_DispatchThreadID) {
@@ -52,23 +59,35 @@ void main(uint3 thread:SV_DispatchThreadID) {
  Result result=(Result)0;result.position=s.position;result.flags=s.flags;
  result.visible=1;result.original=s.original;result.sourceAmbient=s.sourceAmbient;
  result.material=s.material;result.kind=s.kind;
- uint color=s.original;
+ uint color=s.original;float3 composed=decode(rawRGB(palette[(s.sourceAmbient>>8)&255]));
  if(s.flags&1) {
   float3 delta=lightPosition-s.position;float distance=length(delta);result.distance=distance;
   float3 normal=normalize(s.normal);float cosine=distance>0?max(0,dot(normal,delta/distance)):0;
   result.cosine=cosine;
   if(distance<radius && distance>0.0625 && cosine>0 && intensity>0) {
-   if(shadowEnabled) {result.flags|=2;result.visible=visible(s.position,normal,delta/distance,distance);}
+   if(shadowEnabled) {
+    result.flags|=2;RtTraceResult trace=visibility(s.position,normal,delta/distance,distance);
+    result.traceStatus=trace.status;result.visible=trace.status==RT_TRACE_MISS;
+    result.steps=trace.steps;result.alphaChecks=trace.alphaChecks;result.alphaRejected=trace.rejected;
+    result.candidateSurface=trace.lastSurface;result.candidateUV=trace.lastUV;result.candidateAlpha=trace.lastAlpha;
+   }
    if(!result.visible)result.flags|=4;
    float falloff=pow(saturate(1-distance/radius),2)/max(distance*distance,256);
    float3 direct=decode(rawRGB(palette[s.sourceAmbient&255]))*lightColor*intensity*falloff*cosine;
    if(result.visible && any(direct>0)) {
     // Ambient already includes exact original COLORMAP once. Only the new
     // direct term is shadowed; selected palette effects tint both contributions.
-    float3 ambient=decode(rawRGB(palette[(s.sourceAmbient>>8)&255]));
-    color=encode(ambient+direct);result.flags|=8;
+    composed+=direct;
+    color=encode(composed);result.flags|=8;
    }
   }
+ }
+ linearRGB[i]=float4(composed,(s.flags&1)?1:0);
+ if(alphaDebug&&(result.flags&2)) {
+  uint3 debug=result.traceStatus>=RT_TRACE_ERROR?uint3(255,0,255):
+    result.alphaChecks?(result.visible?uint3(0,255,0):result.candidateAlpha?uint3(255,0,0):uint3(0,255,255)):
+    result.visible?uint3(32,64,32):uint3(64,32,32);
+  color=debug.r|(debug.g<<8)|(debug.b<<16)|0xff000000;
  }
  result.finalColor=color;results[i]=result;pixels[i]=color;
  uint bgra=(color&0xff00ff00)|((color&255)<<16)|((color>>16)&255);

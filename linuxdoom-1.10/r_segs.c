@@ -201,7 +201,7 @@ R_RenderMaskedSegRange
 	    dc_iscale = 0xffffffffu / (unsigned)spryscale;
 #ifdef _WIN32
 	    GB_WallColumn(dc_x, spryscale);
-            GB_SetMaterialContext(GB_KIND_SPRITE,(unsigned)curline->sidedef->midtexture);
+            GB_SetMaterialContext(GB_KIND_WALL,(unsigned)curline->sidedef->midtexture);
 #endif
 	    
 	    // draw the texture
@@ -784,4 +784,3 @@ R_StoreWallRange
     }
     ds_p++;
 }
-
