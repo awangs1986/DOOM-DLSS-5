@@ -26,4 +26,4 @@ python3 tools/generate_cjk_font.py --font /usr/share/fonts/opentype/noto/NotoSan
 
 字体仅覆盖当前中文包译文中的 289 个非 ASCII 码点；它不替换未迁移的图片菜单、关卡文字、剧情、地图名、聊天宏或存档槽输入。字体实际显示效果仍需在 Windows 游戏实机上检查；文件生成、校验通过或代码路径接通均不能作为画面可读通过证据。
 
-绘制时，CJK 墨迹沿用原 DOOM HUD 字体中 `A` 字形的首个不透明像素调色板索引；透明字形像素不写入画面，也不标记为 G-buffer overlay。HUD 擦除会保留最近一帧绘制的字形高度，因此清空或替换 12px 中文字形时会擦除完整高度；标准 8px ASCII 行仍使用原擦除高度。
+绘制时，从原 DOOM HUD 字体 `A` 字形实际出现的不透明调色板索引中，按 PLAYPAL 未 gamma 校正的 RGB 亮度选出最亮颜色，供整个 CJK 墨迹使用。选择的是 palette index，写入 framebuffer 后仍沿用游戏现有 gamma 路径；没有可用 PLAYPAL 时，回退到首个实际墨迹索引。透明字形像素不写入画面，也不标记为 G-buffer overlay。HUD 擦除会保留最近一帧绘制的字形高度，因此清空或替换 12px 中文字形时会擦除完整高度；标准 8px ASCII 行仍使用原擦除高度。

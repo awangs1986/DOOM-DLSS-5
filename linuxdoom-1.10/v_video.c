@@ -410,22 +410,40 @@ V_DrawPatchDirect
 
 
 //
-/* Find the palette entry used by an opaque pixel in the classic menu font. */
+/* Find the brightest palette entry present in the classic menu font glyph. */
 static int V_FontInkColor(patch_t *patch)
 {
-    int col, width;
+    const unsigned char *palette = NULL;
+    int col, width, fallback = -1, selected = -1, brightest = -1;
     if (!patch) return -1;
     width = SHORT(patch->width);
     if (width <= 0 || width > SCREENWIDTH) return -1;
+#ifdef _WIN32
+    /* Use PLAYPAL's ungamma-corrected values. The selected palette index is
+       still written to the indexed framebuffer, so normal gamma stays intact. */
+    palette = GB_BasePaletteRGB();
+#endif
     for (col = 0; col < width; ++col) {
         column_t *column = (column_t *)((byte *)patch + LONG(patch->columnofs[col]));
         while (column->topdelta != 0xff) {
             int length = column->length;
-            if (length > 0) return ((byte *)column)[3];
+            int i;
+            for (i = 0; i < length; ++i) {
+                int color = ((byte *)column)[3 + i];
+                if (fallback < 0) fallback = color;
+                if (palette) {
+                    const unsigned char *rgb = palette + color * 3;
+                    int brightness = 54 * rgb[0] + 183 * rgb[1] + 19 * rgb[2];
+                    if (brightness > brightest) {
+                        brightest = brightness;
+                        selected = color;
+                    }
+                }
+            }
             column = (column_t *)((byte *)column + length + 4);
         }
     }
-    return -1;
+    return selected >= 0 ? selected : fallback;
 }
 
 /* Only opaque vertical runs are reported to the G-buffer overlay, like posts
