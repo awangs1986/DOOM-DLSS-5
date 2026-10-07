@@ -19,6 +19,7 @@ with tempfile.TemporaryDirectory(prefix="windoom-language-font-") as tmp:
         game = temp / case
         (game / "languages").mkdir(parents=True)
         shutil.copyfile(root / "languages/zh-cn.ini", game / "languages/zh-cn.ini")
+        shutil.copyfile(root / "languages/zh-cn.ini", game / "languages/other.ini")
         if case != "missing":
             font = game / "languages/zh-cn.cjk"
             shutil.copyfile(root / "languages/zh-cn.cjk", font)
@@ -37,4 +38,8 @@ with tempfile.TemporaryDirectory(prefix="windoom-language-font-") as tmp:
                 font.write_bytes(data)
         subprocess.run([str(exe), str(game), "valid" if case == "valid" else "invalid"],
                        cwd=temp, check=True)
+    game = temp / "other-language"
+    (game / "languages").mkdir(parents=True)
+    shutil.copyfile(root / "languages/zh-cn.ini", game / "languages/other.ini")
+    subprocess.run([str(exe), str(game), "other"], cwd=temp, check=True)
 print("CJK font load/fallback tests passed")

@@ -12,7 +12,7 @@ int main(int argc, char **argv)
     int expected_valid;
     if (argc != 3) return 2;
     expected_valid = !strcmp(argv[2], "valid");
-    Lang_Startup(argv[1], "zh-cn");
+    Lang_Startup(argv[1], !strcmp(argv[2], "other") ? "other" : "zh-cn");
     if (expected_valid) {
         assert(!strcmp(Lang_Selected(), "zh-cn"));
         assert(Lang_CjkFontReady());
@@ -27,6 +27,10 @@ int main(int argc, char **argv)
         p = "\xe2(";
         assert(Lang_DecodeUtf8(&p, &cp) == -1 && cp == '?');
         assert(Lang_DecodeUtf8(&p, &cp) == 1 && cp == '(');
+    } else if (!strcmp(argv[2], "other")) {
+        assert(!strcmp(Lang_Selected(), "other"));
+        assert(!Lang_CjkFontReady());
+        assert(!strcmp(Lang_Text("quit.prompt"), "你确定要退出这款精彩的游戏吗？"));
     } else {
         assert(!strcmp(Lang_Selected(), "en"));
         assert(!Lang_CjkFontReady());

@@ -496,7 +496,7 @@ void Lang_Startup(const char *directory, const char *selection)
         else active = Lang_Parse(bytes, n, diag, sizeof(diag));
         fclose(f); free(bytes);
         if (!active) { printf("Language: %s: %s; using en\n", path, diag); return; }
-        if (catalog_has_cjk(active)) {
+        if (!strcmp(id, "zh-cn") && catalog_has_cjk(active)) {
             if (!load_cjk_font(directory, diag, sizeof(diag))) {
                 Lang_Free(active); active = NULL;
                 printf("Language: %s/languages/zh-cn.cjk: %s; using en\n", directory, diag);
@@ -555,14 +555,46 @@ void Lang_MenuText(const char *src, char *dst, size_t capacity, size_t columns, 
     dst[out] = 0;
 }
 
+static size_t append_utf8_bounded(char *dst, size_t capacity, size_t used,
+                                  const char *src, size_t byte_limit)
+{
+    const char *p = src;
+    while (p && *p && used + 1 < capacity && used < byte_limit) {
+        const char *start = p;
+        uint32_t cp;
+        int decoded = Lang_DecodeUtf8(&p, &cp);
+        size_t length = (size_t)(p - start);
+        if (decoded < 0) { dst[used++] = '?'; continue; }
+        if (used + length >= capacity || used + length > byte_limit) break;
+        memcpy(dst + used, start, length); used += length;
+    }
+    if (capacity) dst[used < capacity ? used : capacity - 1] = 0;
+    return used;
+}
+
 void Lang_QuitMessage(char *dst, size_t capacity)
 {
-    char prompt[160], confirm[64];
+    size_t used = 0, confirm_size, prompt_limit;
+    const char *confirm = Lang_Text("quit.confirm");
     if (!capacity) return;
-    Lang_MenuText(Lang_Text("quit.prompt"), prompt, sizeof(prompt), 30, 5);
-    Lang_MenuText(Lang_Text("quit.confirm"), confirm, sizeof(confirm), 30, 2);
-    snprintf(dst, capacity, "%s\n\n%s", prompt, confirm);
-    dst[capacity - 1] = 0;
+    if (!cjk_font) {
+        char prompt[160], confirm[64];
+        Lang_MenuText(Lang_Text("quit.prompt"), prompt, sizeof(prompt), 30, 5);
+        Lang_MenuText(Lang_Text("quit.confirm"), confirm, sizeof(confirm), 30, 2);
+        snprintf(dst, capacity, "%s\n\n%s", prompt, confirm);
+        dst[capacity - 1] = 0;
+        return;
+    }
+    dst[0] = 0;
+    confirm_size = strlen(confirm);
+    if (confirm_size + 3 >= capacity) {
+        append_utf8_bounded(dst, capacity, 0, confirm, capacity - 1);
+        return;
+    }
+    prompt_limit = capacity - confirm_size - 3;
+    used = append_utf8_bounded(dst, capacity, used, Lang_Text("quit.prompt"), prompt_limit);
+    used = append_utf8_bounded(dst, capacity, used, "\n\n", capacity - 1);
+    append_utf8_bounded(dst, capacity, used, confirm, capacity - 1);
 }
 
 int Lang_HasTranslation(const char *key) { return Lang_Lookup(active, key) != NULL; }
@@ -668,13 +700,28 @@ done:
 void Lang_SaveMessage(int load, const char *save_name, char *dst, size_t capacity,
                       char *diag, size_t diag_size)
 {
-    char body[LANG_MAX_VALUE + 129], prompt[160], confirm[64];
+    char body[LANG_MAX_VALUE + 129];
+    const char *confirm = Lang_Text("prompt.yes_no");
+    size_t used = 0, body_limit, confirm_size = strlen(confirm);
     lang_arg_t arg = {"save_name", LANG_ARG_TEXT, save_name};
     if (!capacity) return;
+    dst[0] = 0;
     Lang_Format(load ? "quickload.prompt" : "quicksave.prompt", &arg, 1,
                 body, sizeof(body), diag, diag_size);
-    Lang_MenuText(body, prompt, sizeof(prompt), 30, 5);
-    Lang_MenuText(Lang_Text("prompt.yes_no"), confirm, sizeof(confirm), 30, 2);
-    snprintf(dst, capacity, "%s\n\n%s", prompt, confirm);
-    dst[capacity - 1] = 0;
+    if (!cjk_font) {
+        char prompt[160], legacy_confirm[64];
+        Lang_MenuText(body, prompt, sizeof(prompt), 30, 5);
+        Lang_MenuText(confirm, legacy_confirm, sizeof(legacy_confirm), 30, 2);
+        snprintf(dst, capacity, "%s\n\n%s", prompt, legacy_confirm);
+        dst[capacity - 1] = 0;
+        return;
+    }
+    if (confirm_size + 3 >= capacity) {
+        append_utf8_bounded(dst, capacity, 0, confirm, capacity - 1);
+        return;
+    }
+    body_limit = capacity - confirm_size - 3;
+    used = append_utf8_bounded(dst, capacity, 0, body, body_limit);
+    used = append_utf8_bounded(dst, capacity, used, "\n\n", capacity - 1);
+    append_utf8_bounded(dst, capacity, used, confirm, capacity - 1);
 }

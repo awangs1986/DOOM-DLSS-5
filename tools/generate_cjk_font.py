@@ -100,7 +100,8 @@ def bitmap_bytes(ft, face, codepoint):
     bmp = slot.bitmap
     if not slot.glyph_index or not bmp.width or not bmp.rows or bmp.pixel_mode not in (1, 2):
         raise ValueError(f"missing/unsupported glyph U+{codepoint:04X}")
-    if bmp.width > TILE or bmp.rows > TILE or abs(bmp.pitch) < (bmp.width + 7) // 8:
+    minimum_pitch = (bmp.width + 7) // 8 if bmp.pixel_mode == 1 else bmp.width
+    if bmp.width > TILE or bmp.rows > TILE or abs(bmp.pitch) < minimum_pitch:
         raise ValueError(f"glyph does not fit {TILE}x{TILE}: U+{codepoint:04X}")
     canvas = bytearray(TILE * TILE)
     left = slot.bitmap_left
@@ -150,6 +151,7 @@ def main():
         raise SystemExit(f"unexpected face name: {face.contents.family_name!r}")
     major, minor, patch = C.c_int(), C.c_int(), C.c_int()
     ft.FT_Library_Version.argtypes = [C.c_void_p, C.POINTER(C.c_int), C.POINTER(C.c_int), C.POINTER(C.c_int)]
+    ft.FT_Library_Version.restype = None
     ft.FT_Library_Version(library, C.byref(major), C.byref(minor), C.byref(patch))
     if (major.value, minor.value, patch.value) != (2, 13, 3):
         raise SystemExit("reproducible generation requires FreeType 2.13.3")

@@ -35,5 +35,7 @@ with tempfile.TemporaryDirectory(prefix="windoom-language-consumers-") as tmp:
     game = temp / "game"
     (game / "languages").mkdir(parents=True)
     shutil.copyfile(root / "languages/es-ascii.ini", game / "languages/es-ascii.ini")
-    for language in ("en", "es-ascii"):
+    shutil.copyfile(root / "languages/zh-cn.ini", game / "languages/zh-cn.ini")
+    shutil.copyfile(root / "languages/zh-cn.cjk", game / "languages/zh-cn.cjk")
+    for language in ("en", "es-ascii", "zh-cn"):
         subprocess.run([str(exe), str(game), language], cwd=temp, check=True)
