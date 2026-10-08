@@ -42,6 +42,7 @@ static const char rcsid[] = "$Id: r_main.c,v 1.5 1997/02/03 22:45:12 b1 Exp $";
 
 #ifdef _WIN32
 #include "fsr2.h"
+#include "gbuffer.h"
 #endif
 
 
@@ -882,7 +883,13 @@ void R_RenderPlayerView (player_t* player)
 {	
     R_SetupFrame (player);
 #ifdef _WIN32
-    Fsr2_ApplyRasterJitter();
+    {
+        float jitter_x, jitter_y;
+        GB_BeginScene();
+        Fsr2_ApplyRasterJitter();
+        Fsr2_GetRasterJitter(&jitter_x, &jitter_y);
+        GB_CaptureSampling(jitter_x, jitter_y);
+    }
 #endif
 
     // Clear buffers.

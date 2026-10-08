@@ -155,7 +155,7 @@ void R_DrawColumn (void)
     // Determine scaling,
     //  which is the only mapping to be done.
     fracstep = dc_iscale; 
-    frac = dc_texturemid + (dc_yl-centery)*fracstep; 
+    frac = dc_texturemid + FixedMul((dc_yl << FRACBITS) - centeryfrac, fracstep);
 
     // Inner loop that does the actual texture mapping,
     //  e.g. a DDA-lile scaling.
@@ -164,7 +164,14 @@ void R_DrawColumn (void)
     {
 	// Re-map color indices from wall texture column
 	//  using a lighting/special effects LUT.
-	*dest = dc_colormap[dc_source[(frac>>FRACBITS)&127]];
+        {
+            byte raw=dc_source[(frac>>FRACBITS)&127];
+            byte mapped=dc_colormap[raw];
+#ifdef _WIN32
+            GB_RecordMaterialSample((int)(dest-screens[0]),raw,mapped);
+#endif
+            *dest=mapped;
+        }
 	
 	dest += SCREENWIDTH; 
 	frac += fracstep;
@@ -200,7 +207,7 @@ void R_DrawColumn (void)
     dest = ylookup[dc_yl] + columnofs[dc_x];  
 	 
     fracstep = dc_iscale<<9; 
-    frac = (dc_texturemid + (dc_yl-centery)*dc_iscale)<<9; 
+    frac = (dc_texturemid + FixedMul((dc_yl << FRACBITS) - centeryfrac, dc_iscale))<<9;
  
     fracstep2 = fracstep+fracstep;
     fracstep3 = fracstep2+fracstep;
@@ -260,17 +267,32 @@ void R_DrawColumnLow (void)
     dest2 = ylookup[dc_yl] + columnofs[(dc_x << 1) + 1];
     
     fracstep = dc_iscale; 
-    frac = dc_texturemid + (dc_yl-centery)*fracstep;
+    frac = dc_texturemid + FixedMul((dc_yl << FRACBITS) - centeryfrac, fracstep);
     
     do 
     {
 	// Hack. Does not work corretly.
-	*dest2 = *dest = dc_colormap[dc_source[(frac>>FRACBITS)&127]];
+        {
+            byte raw=dc_source[(frac>>FRACBITS)&127], mapped=dc_colormap[raw];
+#ifdef _WIN32
+            GB_RecordMaterialSample((int)(dest-screens[0]),raw,mapped);
+            GB_RecordMaterialSample((int)(dest2-screens[0]),raw,mapped);
+#endif
+            *dest2=*dest=mapped;
+        }
 	dest += SCREENWIDTH;
 	dest2 += SCREENWIDTH;
 	frac += fracstep; 
 
     } while (count--);
+#ifdef _WIN32
+    GB_MarkOverlayColumn(columnofs[dc_x << 1],
+                         (int)(ylookup[dc_yl] - screens[0]) / SCREENWIDTH,
+                         dc_yh - dc_yl + 1);
+    GB_MarkOverlayColumn(columnofs[(dc_x << 1) + 1],
+                         (int)(ylookup[dc_yl] - screens[0]) / SCREENWIDTH,
+                         dc_yh - dc_yl + 1);
+#endif
 }
 
 
@@ -360,7 +382,7 @@ void R_DrawFuzzColumn (void)
 
     // Looks familiar.
     fracstep = dc_iscale; 
-    frac = dc_texturemid + (dc_yl-centery)*fracstep; 
+    frac = dc_texturemid + FixedMul((dc_yl << FRACBITS) - centeryfrac, fracstep);
 
     // Looks like an attempt at dithering,
     //  using the colormap #6 (of 0-31, a bit
@@ -442,7 +464,7 @@ void R_DrawTranslatedColumn (void)
 
     // Looks familiar.
     fracstep = dc_iscale; 
-    frac = dc_texturemid + (dc_yl-centery)*fracstep; 
+    frac = dc_texturemid + FixedMul((dc_yl << FRACBITS) - centeryfrac, fracstep);
 
     // Here we do an additional index re-mapping.
     do 
@@ -566,7 +588,13 @@ void R_DrawSpan (void)
 
 	// Lookup pixel from flat texture tile,
 	//  re-index using light/colormap.
-	*dest++ = ds_colormap[ds_source[spot]];
+        {
+            byte raw=ds_source[spot], mapped=ds_colormap[raw];
+#ifdef _WIN32
+            GB_RecordMaterialSample((int)(dest-screens[0]),raw,mapped);
+#endif
+            *dest++=mapped;
+        }
 
 	// Next step in u,v.
 	xfrac += ds_xstep; 
@@ -680,8 +708,20 @@ void R_DrawSpanLow (void)
 	spot = ((yfrac>>(16-6))&(63*64)) + ((xfrac>>16)&63);
 	// Lowres/blocky mode does it twice,
 	//  while scale is adjusted appropriately.
-	*dest++ = ds_colormap[ds_source[spot]]; 
-	*dest++ = ds_colormap[ds_source[spot]];
+        {
+            byte raw=ds_source[spot], mapped=ds_colormap[raw];
+#ifdef _WIN32
+            GB_RecordMaterialSample((int)(dest-screens[0]),raw,mapped);
+#endif
+            *dest++=mapped;
+        }
+        {
+            byte raw=ds_source[spot], mapped=ds_colormap[raw];
+#ifdef _WIN32
+            GB_RecordMaterialSample((int)(dest-screens[0]),raw,mapped);
+#endif
+            *dest++=mapped;
+        }
 	
 	xfrac += ds_xstep; 
 	yfrac += ds_ystep; 

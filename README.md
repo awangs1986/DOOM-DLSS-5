@@ -64,12 +64,34 @@ Same thing for one run:
 
        .\play-windoom.cmd --ngx-dlss5 -playdemo compare -export D:\frames\dlss5
 
-`-export` runs one game tic per frame (35 fps timeline; playback is
-just slower). PNGs match the window, including HUD and F1–F4 views.
+`-export` advances gameplay at one tic per normal frame. Transition wipes
+can export extra frames without advancing the game tic. For matched demo
+comparisons, use `-gpu-timing <new.csv>` and align its `game_tic` column;
+see [GPU baseline capture](docs/gpu-baseline.md). PNGs include HUD and F1–F4 views.
 
        ffmpeg -framerate 35 -i D:\frames\windoom-ngx-dlss5\f%06d.png -c:v libx264 -pix_fmt yuv420p dlss5.mp4
 
+## DXR hardware diagnostic
+
+Use `-rt-diagnostic` to show hardware ray hits against a minimal triangle,
+`F5` to return to gameplay, `-adapter <DXGI index>` to select the actual GPU,
+and `-nort` to disable RT. DXR and NGX capabilities are checked independently.
+See [DXR diagnostic](docs/dxr-diagnostic.md) for DXC requirements and fallback.
+For actual map lighting, open **Options → Graphics** and toggle RT. The staged
+`rt-light.cfg` and `rt-materials.cfg` configure hard shadows and selected-material
+single reflections; RT remains off until requested. SR is controlled separately.
+See [graphics menu](docs/graphics-menu.md), [map lighting](docs/dxr-lighting.md),
+[reflections](docs/dxr-reflection.md), and [packaged usage](docs/packaged-usage.md).
+
 ## DLSS 5 Swapper
+
+DLSS 5 / DLSSNR means neural rendering enhancement, a feature independently
+defined from Super Resolution (SR) and DLAA. The project's existing DLSS5 route
+uses preset L SR followed by Swapper's NR integration. The native host provides
+an optional DLAA carrier for that external consumer; carrier execution and
+actual NR execution are recorded separately. See [project terminology](CONTEXT.md)
+and [`win32/README-NGX.md`](win32/README-NGX.md) for the integration and current
+verification limits.
 
 Point Swapper at `build-win\Release\windoom-ngx-dlss5` (not the
 Release root). DirectX 12, **Native**. Do not drop your own

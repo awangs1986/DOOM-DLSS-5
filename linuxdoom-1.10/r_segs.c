@@ -41,6 +41,7 @@ rcsid[] = "$Id: r_segs.c,v 1.3 1997/01/29 20:10:19 b1 Exp $";
 
 #ifdef _WIN32
 #include "gbuffer.h"
+#include <math.h>
 
 static void GB_WallColumn(int x, fixed_t scale)
 {
@@ -53,10 +54,19 @@ static void GB_WallColumn(int x, fixed_t scale)
 	z = (float)projection / (float)scale;
     an = rw_normalangle >> ANGLETOFINESHIFT;
     GB_SetColumn(x, z,
-		 (float)finecosine[an] / 65536.0f,
+		 -(float)finecosine[an] / 65536.0f,
 		 0.0f,
-		 (float)finesine[an] / 65536.0f,
+		 -(float)finesine[an] / 65536.0f,
 		 GB_KIND_WALL);
+    /* The lookup-table normal above preserves the existing packed diagnostic
+     * and lighting path. Reflection needs the real directed seg plane. */
+    if (curline && curline->v1 && curline->v2) {
+        double dx = (double)curline->v2->x - (double)curline->v1->x;
+        double dy = (double)curline->v2->y - (double)curline->v1->y;
+        double length = sqrt(dx * dx + dy * dy);
+        if (length > 0.0)
+            GB_SetColumnGeometricNormal((float)(dy / length),0.0f,(float)(-dx / length));
+    }
 }
 #endif
 
@@ -201,6 +211,7 @@ R_RenderMaskedSegRange
 	    dc_iscale = 0xffffffffu / (unsigned)spryscale;
 #ifdef _WIN32
 	    GB_WallColumn(dc_x, spryscale);
+            GB_SetMaterialContext(GB_KIND_WALL,(unsigned)curline->sidedef->midtexture);
 #endif
 	    
 	    // draw the texture
@@ -314,7 +325,10 @@ void R_RenderSegLoop (void)
 	    dc_yl = yl;
 	    dc_yh = yh;
 	    dc_texturemid = rw_midtexturemid;
-	    dc_source = R_GetColumn(midtexture,texturecolumn);
+	    #ifdef _WIN32
+            GB_SetMaterialContext(GB_KIND_WALL, (unsigned)sidedef->midtexture);
+#endif
+            dc_source = R_GetColumn(midtexture,texturecolumn);
 	    colfunc ();
 	    ceilingclip[rw_x] = viewheight;
 	    floorclip[rw_x] = -1;
@@ -336,7 +350,10 @@ void R_RenderSegLoop (void)
 		    dc_yl = yl;
 		    dc_yh = mid;
 		    dc_texturemid = rw_toptexturemid;
-		    dc_source = R_GetColumn(toptexture,texturecolumn);
+		    #ifdef _WIN32
+            GB_SetMaterialContext(GB_KIND_WALL, (unsigned)sidedef->toptexture);
+#endif
+            dc_source = R_GetColumn(toptexture,texturecolumn);
 		    colfunc ();
 		    ceilingclip[rw_x] = mid;
 		}
@@ -365,7 +382,10 @@ void R_RenderSegLoop (void)
 		    dc_yl = mid;
 		    dc_yh = yh;
 		    dc_texturemid = rw_bottomtexturemid;
-		    dc_source = R_GetColumn(bottomtexture,
+		    #ifdef _WIN32
+            GB_SetMaterialContext(GB_KIND_WALL, (unsigned)sidedef->bottomtexture);
+#endif
+            dc_source = R_GetColumn(bottomtexture,
 					    texturecolumn);
 		    colfunc ();
 		    floorclip[rw_x] = mid;
@@ -774,4 +794,3 @@ R_StoreWallRange
     }
     ds_p++;
 }
-

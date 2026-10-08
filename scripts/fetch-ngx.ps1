@@ -1,119 +1,334 @@
 # Copyright (C) 2026 Nikolai Zhivotenko. GPLv2; see LICENSE.TXT.
-# Downloads the public NVIDIA DLSS SDK for a local build. Does not vendor it.
-
+# Installs only the pinned official Windows x64 SDK and Release SR/RR runtimes.
+[CmdletBinding()]
+param(
+    [string]$Root,
+    [string]$CacheDirectory,
+    [switch]$Offline,
+    [string]$RestoreBackup
+)
 $ErrorActionPreference = 'Stop'
-$Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$Dest = Join-Path $Root 'third_party\ngx'
-$Tag = 'v310.7.0'
-$ZipUrl = "https://github.com/NVIDIA/DLSS/archive/refs/tags/$Tag.zip"
-$Header = Join-Path $Dest 'include\nvsdk_ngx.h'
-$Cache = Join-Path $Root 'build-win\_ngx_fetch'
-$Tmp = Join-Path $Cache "$Tag.zip"
-$Unpack = Join-Path $Cache 'unpack'
-$LegacyTmp = Join-Path $env:TEMP "windoom-dlss-$Tag.zip"
-$LegacyUnpack = Join-Path $env:TEMP "windoom-dlss-$Tag"
+Set-StrictMode -Version 2
+if (-not $Root) { $Root = Split-Path -Parent $PSScriptRoot }
+$Root = [IO.Path]::GetFullPath($Root)
+if (-not $CacheDirectory) { $CacheDirectory = Join-Path $Root 'build-win/_ngx_fetch' }
+$CacheDirectory = [IO.Path]::GetFullPath($CacheDirectory)
+$Release = Get-Content (Join-Path $PSScriptRoot 'ngx-release.json') -Raw | ConvertFrom-Json
+$Dest = Join-Path $Root 'third_party/ngx'
+$ModeNames = @('windoom-ngx-dlss3.5', 'windoom-ngx-dlss4', 'windoom-ngx-dlss4.5', 'windoom-ngx-dlss5')
+$Lock = $null
+$Transaction = $null
 
-function Expand-NgxZip {
-    param([string]$ZipPath, [string]$OutDir)
-
-    New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-    $tar = Get-Command tar.exe -ErrorAction SilentlyContinue
-    if ($tar) {
-        & $tar.Source -xf $ZipPath -C $OutDir
-        if ($LASTEXITCODE -eq 0) { return }
-        Write-Host "tar failed, trying ZipFile."
-        Remove-Item $OutDir -Recurse -Force
-        New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-    }
-
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-    [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipPath, $OutDir)
+function Write-Json($Value, [string]$Path) {
+    $Value | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $Path -Encoding UTF8
 }
-
-function Get-NgxZip {
-    param([string]$Url, [string]$ZipPath)
-
-    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
-    if ($curl) {
-        & $curl.Source -fsSL -o $ZipPath $Url
-        if ($LASTEXITCODE -ne 0) { throw "curl failed to download $Url" }
-        return
+function Get-Hash([string]$Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
+function Assert-NoReparsePath([string]$Path) {
+    # Inspect every existing component, including directory junctions. Never
+    # hash, copy, back up or publish through a link supplied by a local cache.
+    $component = [IO.Path]::GetFullPath($Path)
+    while ($component) {
+        $item = Get-Item -LiteralPath $component -Force -ErrorAction SilentlyContinue
+        if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Reparse/symbolic-link path is not supported: $component"
+        }
+        $parent = Split-Path -Parent $component
+        if ($parent -eq $component) { break }
+        $component = $parent
     }
-    Invoke-WebRequest -Uri $Url -OutFile $ZipPath
 }
-
-Write-Host "WinDoom: fetch NVIDIA DLSS SDK ($Tag)"
-Write-Host "Destination (gitignored): $Dest"
-Write-Host "SDK license is NVIDIA's, not GPLv2. See win32\README-NGX.md"
-Write-Host ""
-
-if (Test-Path $Header) {
-    Write-Host "SDK already present."
-} else {
-    if (Test-Path $Dest) {
-        Write-Host "Incomplete SDK tree, fetching again."
-        Remove-Item $Dest -Recurse -Force
+function Get-SafeTree([string]$Directory) {
+    Assert-NoReparsePath $Directory
+    # Walk one level at a time so a junction/symlink is rejected before descent.
+    foreach ($item in Get-ChildItem -LiteralPath $Directory -Force) {
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Reparse/symbolic-link SDK entry is not supported: $($item.FullName)"
+        }
+        $item
+        if ($item.PSIsContainer) { Get-SafeTree $item.FullName }
     }
-    New-Item -ItemType Directory -Force -Path $Cache | Out-Null
-    if (Test-Path $LegacyUnpack) {
-        Remove-Item $LegacyUnpack -Recurse -Force
-    }
-    if (-not (Test-Path $Tmp) -and (Test-Path $LegacyTmp)) {
-        Write-Host "Moving leftover zip off %TEMP%."
-        Move-Item $LegacyTmp $Tmp
-    } elseif (Test-Path $LegacyTmp) {
-        Remove-Item $LegacyTmp -Force
-    }
-    if (Test-Path $Unpack) { Remove-Item $Unpack -Recurse -Force }
-
-    if (-not (Test-Path $Tmp)) {
-        Write-Host "Downloading $ZipUrl"
-        Get-NgxZip -Url $ZipUrl -ZipPath $Tmp
-    } else {
-        Write-Host "Using cached zip $Tmp"
-    }
-
-    Expand-NgxZip -ZipPath $Tmp -OutDir $Unpack
-    $Inner = Get-ChildItem $Unpack -Directory | Select-Object -First 1
-    if (-not $Inner) { throw "Zip had no folder" }
-    New-Item -ItemType Directory -Force -Path (Split-Path $Dest) | Out-Null
-    Move-Item $Inner.FullName $Dest
-    Remove-Item $Unpack -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item $Tmp -Force -ErrorAction SilentlyContinue
-    if (-not (Test-Path $Header)) { throw "nvsdk_ngx.h missing after unpack" }
-    Write-Host "Unpacked headers and libs."
 }
-
-$Dlls = @(
-    (Get-ChildItem -Path $Dest -Recurse -Filter 'nvngx_dlss.dll' -ErrorAction SilentlyContinue | Select-Object -First 1),
-    (Get-ChildItem -Path $Dest -Recurse -Filter 'nvngx_dlssd.dll' -ErrorAction SilentlyContinue | Select-Object -First 1)
-)
-$ExeDirs = @(
-    (Join-Path $Root 'build-win\Release\windoom-ngx-dlss3.5'),
-    (Join-Path $Root 'build-win\Release\windoom-ngx-dlss4'),
-    (Join-Path $Root 'build-win\Release\windoom-ngx-dlss4.5'),
-    (Join-Path $Root 'build-win\Release\windoom-ngx-dlss5')
-)
-$copiedAny = $false
-foreach ($dll in $Dlls) {
-    if (-not $dll) { continue }
-    foreach ($dir in $ExeDirs) {
-        if (Test-Path $dir) {
-            Copy-Item $dll.FullName (Join-Path $dir $dll.Name) -Force
-            Write-Host "Copied $($dll.Name) -> $dir"
-            $copiedAny = $true
+function Get-PinnedPath([string]$Directory, [string]$Relative) {
+    if ($Relative -match '(^[/\\]|(^|[/\\])\.\.?([/\\]|$)|:|[?*])') { throw 'Invalid pinned SDK path.' }
+    $path = Join-Path $Directory $Relative
+    Assert-NoReparsePath $path
+    return $path
+}
+function Test-Files([string]$Directory) {
+    foreach ($f in $Release.files) {
+        $path = Get-PinnedPath $Directory $f.path
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+        if ((Get-Item -LiteralPath $path).Length -ne $f.size -or (Get-Hash $path) -ne $f.sha256) { return $false }
+    }
+    return $true
+}
+function Test-InstalledInventory([string]$Directory) {
+    $allowed = @{ 'ngx-install.json' = $true }
+    foreach ($file in $Release.files) {
+        $relative = $file.path.Replace('\', '/')
+        $allowed[$relative] = $true
+        while ($relative.Contains('/')) {
+            $relative = $relative.Substring(0, $relative.LastIndexOf('/'))
+            $allowed[$relative] = $true
         }
     }
+    foreach ($item in Get-SafeTree $Directory) {
+        $relative = $item.FullName.Substring($Directory.Length + 1).Replace('\', '/')
+        if (-not $allowed.ContainsKey($relative)) {
+            Write-Host "Unexpected installed SDK entry; staging a pinned replacement: $relative"
+            return $false
+        }
+    }
+    return $true
 }
-if (-not $copiedAny) {
-    Write-Host "nvngx_dlss.dll / nvngx_dlssd.dll not copied; stage folders first or copy next to windoom.exe later."
+function Copy-PinnedSdk([string]$Cache, [string]$Stage) {
+    # The stage starts empty. Cache extras, including receipts and alternate
+    # headers/libraries, never become part of the verified build include path.
+    New-Item -ItemType Directory -Path $Stage | Out-Null
+    foreach ($file in $Release.files) {
+        $source = Get-PinnedPath $Cache $file.path
+        $target = Get-PinnedPath $Stage $file.path
+        New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+        Copy-Item -LiteralPath $source -Destination $target
+    }
+    if (-not (Test-Files $Stage)) { throw 'Pinned SDK staging checksum mismatch.' }
+}
+function Get-RuntimeInfo([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $reader = New-Object IO.BinaryReader($stream)
+    try {
+        if ($reader.ReadUInt16() -ne 0x5a4d) { throw "Not a PE DLL: $Path" }
+        $stream.Position = 0x3c
+        $offset = $reader.ReadUInt32()
+        $stream.Position = $offset
+        if ($reader.ReadUInt32() -ne 0x4550 -or $reader.ReadUInt16() -ne 0x8664) { throw "Not Windows x64: $Path" }
+    } finally { $reader.Dispose() }
+    $expected = $Release.files | Where-Object { [IO.Path]::GetFileName($_.path) -eq [IO.Path]::GetFileName($Path) }
+    $info = [Diagnostics.FileVersionInfo]::GetVersionInfo($Path)
+    $version = $expected.fileVersion
+    $versionCheck = 'pinned-sha256 (file-resource inspection unavailable)'
+    if ($info.FileVersion) {
+        $actual = '{0}.{1}.{2}.{3}' -f $info.FileMajorPart, $info.FileMinorPart, $info.FileBuildPart, $info.FilePrivatePart
+        if ($actual -ne $version) { throw "Unexpected file version: $actual" }
+        $versionCheck = 'PE file resource verified'
+    }
+    # The upstream pin fixes identity even when Authenticode is unavailable.
+    $signature = 'unavailable-on-this-platform'
+    if (Get-Command Get-AuthenticodeSignature -ErrorAction SilentlyContinue) {
+        $sig = Get-AuthenticodeSignature -LiteralPath $Path
+        $signature = [string]$sig.Status
+        if ($sig.Status -ne 'Valid') { throw "Authenticode validation failed ($signature): $Path" }
+        if ($sig.SignerCertificate.Subject -notmatch 'NVIDIA') { throw "Unexpected DLL signer: $Path" }
+    }
+    return [ordered]@{ name = [IO.Path]::GetFileName($Path); architecture = 'x64'; configuration = 'Release'; fileVersion = $version; versionCheck = $versionCheck; sha256 = Get-Hash $Path; checksum = 'verified'; authenticode = $signature }
+}
+function Get-File([string]$Path, [string]$Url) {
+    $partial = "$Path.partial"
+    try {
+        $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+        if ($curl) {
+            & $curl.Source --fail --silent --show-error --location --retry 2 --connect-timeout 20 --max-time 300 --output $partial $Url
+            if ($LASTEXITCODE -ne 0) { throw "Download failed: $Url" }
+        } else {
+            Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $partial -TimeoutSec 300
+        }
+        Move-Item -LiteralPath $partial -Destination $Path -Force
+    } finally {
+        if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
+    }
+}
+function Assert-Unlocked([string]$Path) {
+    Assert-NoReparsePath $Path
+    if (Test-Path -LiteralPath $Path -PathType Container) {
+        foreach ($file in Get-SafeTree $Path | Where-Object { -not $_.PSIsContainer }) { Assert-Unlocked $file.FullName }
+    } elseif (Test-Path -LiteralPath $Path -PathType Leaf) {
+        # No forced overwrite: sharing violations abort before publication.
+        $handle = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        $handle.Dispose()
+    }
+}
+function Commit-Entries($Entries, [string]$Transaction) {
+    $backup = Join-Path $CacheDirectory ('backups/' + [IO.Path]::GetFileName($Transaction))
+    Assert-NoReparsePath $backup
+    $journal = @()
+    foreach ($entry in $Entries) {
+        $target = Join-Path $Root $entry.relative
+        Assert-Unlocked $target
+        $journal += [ordered]@{ relative = $entry.relative; existed = (Test-Path -LiteralPath $target); sha256 = $null; inventory = @() }
+    }
+    New-Item -ItemType Directory -Path $backup -Force | Out-Null
+    # All rollback material exists before the first target is changed.
+    foreach ($item in $journal) {
+        if ($item.existed) {
+            $old = Join-Path $backup ('old/' + $item.relative)
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $old) | Out-Null
+            Copy-Item -LiteralPath (Join-Path $Root $item.relative) -Destination $old -Recurse
+            if (Test-Path -LiteralPath $old -PathType Leaf) { $item.sha256 = Get-Hash $old }
+            else {
+                foreach ($file in Get-SafeTree $old | Where-Object { -not $_.PSIsContainer }) {
+                    $relative = $file.FullName.Substring($old.Length + 1).Replace('\', '/')
+                    $item.inventory += [ordered]@{ path = $relative; sha256 = Get-Hash $file.FullName }
+                }
+            }
+        }
+    }
+    Write-Json ([ordered]@{ schemaVersion = 1; sdkTag = $Release.sdkTag; createdUtc = [DateTime]::UtcNow.ToString('o'); entries = $journal; completed = $false }) (Join-Path $backup 'backup.json')
+    $changed = @()
+    try {
+        for ($i = 0; $i -lt $Entries.Count; ++$i) {
+            $entry = $Entries[$i]
+            $target = Join-Path $Root $entry.relative
+            $held = Join-Path $Transaction ('held/' + $entry.relative)
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $held) | Out-Null
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
+            if (Test-Path -LiteralPath $target) { Move-Item -LiteralPath $target -Destination $held }
+            $changed += [ordered]@{ target = $target; held = $held }
+            if ($entry.source) { Move-Item -LiteralPath $entry.source -Destination $target }
+        }
+        Write-Json ([ordered]@{ schemaVersion = 1; sdkTag = $Release.sdkTag; createdUtc = [DateTime]::UtcNow.ToString('o'); entries = $journal; completed = $true }) (Join-Path $backup 'backup.json')
+        Write-Host "Published; backup: $([IO.Path]::GetFileName($backup))"
+    } catch {
+        for ($i = $changed.Count - 1; $i -ge 0; --$i) {
+            $item = $changed[$i]
+            if (Test-Path -LiteralPath $item.target) { Remove-Item -LiteralPath $item.target -Recurse -Force }
+            if (Test-Path -LiteralPath $item.held) { Move-Item -LiteralPath $item.held -Destination $item.target }
+        }
+        throw
+    }
 }
 
-Write-Host ""
-Write-Host "Next:"
-Write-Host "  .\build.cmd --ngx-dlss3.5"
-Write-Host "  .\build.cmd --ngx-dlss4"
-Write-Host "  .\build.cmd --ngx-dlss4.5"
-Write-Host "  .\build.cmd --ngx-dlss5"
-Write-Host "  .\build.cmd --all"
-Write-Host "CMake will pick up third_party\ngx automatically."
+try {
+    Assert-NoReparsePath $Root
+    Assert-NoReparsePath $CacheDirectory
+    Assert-NoReparsePath $Dest
+    New-Item -ItemType Directory -Path $CacheDirectory -Force | Out-Null
+    # Serialize fetch/build/deploy operations in this checkout.
+    $lockDirectory = Join-Path $Root 'build-win/_ngx_fetch'
+    Assert-NoReparsePath $lockDirectory
+    Assert-NoReparsePath (Join-Path $lockDirectory 'install.lock')
+    New-Item -ItemType Directory -Force -Path $lockDirectory | Out-Null
+    $Lock = [IO.File]::Open((Join-Path $lockDirectory 'install.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+    $Transaction = Join-Path $CacheDirectory ('transaction-' + [Guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $Transaction | Out-Null
+    $entries = @()
+    if ($RestoreBackup) {
+        if ($RestoreBackup -notmatch '^transaction-[a-f0-9]{32}$') { throw 'Use the backup identifier printed by a successful install.' }
+        $backup = Join-Path $CacheDirectory ('backups/' + $RestoreBackup)
+        Assert-NoReparsePath (Join-Path $backup 'backup.json')
+        $record = Get-Content -LiteralPath (Join-Path $backup 'backup.json') -Raw | ConvertFrom-Json
+        if (-not $record.completed) { throw 'Backup is from an incomplete install.' }
+        foreach ($item in $record.entries) {
+            # Backup metadata is local data; keep its paths inside managed targets.
+            if ($item.relative -notmatch '^(third_party/ngx|build-win/Release/windoom-ngx-dlss(3\.5|4|4\.5|5)/(nvngx_dlss(d)?\.dll|ngx-install\.json))$') { throw 'Invalid backup path.' }
+            $source = $null
+            if ($item.existed) {
+                $old = Join-Path $backup ('old/' + $item.relative)
+                Assert-NoReparsePath $old
+                if (-not (Test-Path -LiteralPath $old)) { throw "Backup missing: $($item.relative)" }
+                if (Test-Path -LiteralPath $old -PathType Container) { $null = @(Get-SafeTree $old) }
+                if ($item.sha256 -and (Get-Hash $old) -ne $item.sha256) { throw "Backup corrupted: $($item.relative)" }
+                if ($item.inventory.Count -and @(Get-ChildItem -LiteralPath $old -File -Recurse).Count -ne $item.inventory.Count) { throw 'Backup SDK inventory changed.' }
+                foreach ($file in $item.inventory) {
+                    if ($file.path -match '(^[/\\]|(^|[/\\])\.\.([/\\]|$)|:)') { throw 'Invalid backup inventory path.' }
+                    $check = Join-Path $old $file.path
+                    Assert-NoReparsePath $check
+                    if (-not (Test-Path -LiteralPath $check -PathType Leaf) -or (Get-Hash $check) -ne $file.sha256) { throw "Backup SDK file corrupted: $($file.path)" }
+                }
+                $source = Join-Path $Transaction ('new/' + $item.relative)
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $source) | Out-Null
+                Copy-Item -LiteralPath $old -Destination $source -Recurse
+            }
+            $entries += [ordered]@{ relative = $item.relative; source = $source }
+        }
+        Commit-Entries $entries $Transaction
+        Write-Host 'Restored SDK, libraries and deployed runtimes as one snapshot.'
+    } else {
+        Write-Host "WinDoom: official NVIDIA SDK $($Release.sdkTag), commit $($Release.commit)"
+        $cache = Join-Path $CacheDirectory $Release.commit
+        Assert-NoReparsePath $cache
+        New-Item -ItemType Directory -Force -Path $cache | Out-Null
+        $reuse = $false
+        Assert-NoReparsePath (Join-Path $Dest 'ngx-install.json')
+        if (Test-Path -LiteralPath (Join-Path $Dest 'ngx-install.json')) {
+            try {
+                $installed = Get-Content -LiteralPath (Join-Path $Dest 'ngx-install.json') -Raw | ConvertFrom-Json
+                $reuse = ($installed.commit -eq $Release.commit) -and ($installed.sdkTag -eq $Release.sdkTag) -and
+                    ($installed.source -eq $Release.source) -and ($installed.architecture -eq $Release.architecture) -and
+                    ($installed.configuration -eq $Release.configuration) -and
+                    (($installed.files | ConvertTo-Json -Depth 4 -Compress) -eq ($Release.files | ConvertTo-Json -Depth 4 -Compress)) -and (Test-Files $Dest) -and (Test-InstalledInventory $Dest)
+            } catch { Write-Host 'Invalid installation metadata; staging a complete replacement.' }
+        }
+        if ($reuse) { $sdk = $Dest; Write-Host 'Verified installed SDK; reusing complete installation.' }
+        else {
+            foreach ($file in $Release.files) {
+                $path = Get-PinnedPath $cache $file.path
+                Assert-NoReparsePath "$path.partial"
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+                $valid = (Test-Path -LiteralPath $path -PathType Leaf) -and ((Get-Hash $path) -eq $file.sha256)
+                if (-not $valid) {
+                    if ($Offline) { throw "Offline cache missing or corrupt: $($file.path)" }
+                    Get-File $path "https://raw.githubusercontent.com/NVIDIA/DLSS/$($Release.commit)/$($file.path)"
+                    if ((Get-Hash $path) -ne $file.sha256) { throw "SHA256 mismatch: $($file.path)" }
+                }
+            }
+            if (-not (Test-Files $cache)) { throw 'Incomplete or corrupted SDK cache.' }
+            $sdk = Join-Path $Transaction 'sdk'
+            Copy-PinnedSdk $cache $sdk
+            $entries += [ordered]@{ relative = 'third_party/ngx'; source = $sdk }
+        }
+        $sr = Get-RuntimeInfo (Join-Path $sdk 'lib/Windows_x86_64/rel/nvngx_dlss.dll')
+        $rr = Get-RuntimeInfo (Join-Path $sdk 'lib/Windows_x86_64/rel/nvngx_dlssd.dll')
+        $metadata = [ordered]@{ schemaVersion = 1; sdkTag = $Release.sdkTag; commit = $Release.commit; source = $Release.source; releaseUrl = $Release.releaseUrl; architecture = $Release.architecture; configuration = $Release.configuration; verifiedUtc = $Release.verifiedUtc; runtimes = @($sr, $rr); files = $Release.files }
+        if (-not $reuse) { Write-Json $metadata (Join-Path $sdk 'ngx-install.json') }
+        foreach ($name in $ModeNames) {
+            $relative = 'build-win/Release/' + $name
+            $directory = Join-Path $Root $relative
+            Assert-NoReparsePath $directory
+            foreach ($managed in @('nvngx_dlss.dll', 'nvngx_dlssd.dll', 'ngx-install.json')) {
+                Assert-NoReparsePath (Join-Path $directory $managed)
+            }
+            if (-not (Test-Path -LiteralPath $directory)) { continue }
+            $runtimeSet = @($sr)
+            $staleRR = $null
+            if ($name -eq 'windoom-ngx-dlss3.5') { $runtimeSet += $rr }
+            elseif (Test-Path -LiteralPath (Join-Path $directory 'nvngx_dlssd.dll') -PathType Leaf) {
+                # The legacy fetcher copied RR into all NGX modes. Remove only
+                # this managed obsolete runtime, through the backup transaction.
+                $staleRR = $relative + '/nvngx_dlssd.dll'
+            }
+            $modeMetadata = [ordered]@{ schemaVersion = 1; sdkTag = $Release.sdkTag; commit = $Release.commit; source = $Release.source; architecture = 'Windows x64'; configuration = 'Release'; runtimes = $runtimeSet }
+            $changed = ($null -ne $staleRR) -or (-not $reuse) -or (-not (Test-Path -LiteralPath (Join-Path $directory 'ngx-install.json')))
+            foreach ($runtime in $runtimeSet) {
+                $target = Join-Path $directory $runtime.name
+                if (-not (Test-Path -LiteralPath $target) -or (Get-Hash $target) -ne $runtime.sha256) { $changed = $true }
+            }
+            if (-not $changed) {
+                try {
+                    $m = Get-Content -LiteralPath (Join-Path $directory 'ngx-install.json') -Raw | ConvertFrom-Json
+                    if (($m | ConvertTo-Json -Depth 12 -Compress) -ne ($modeMetadata | ConvertTo-Json -Depth 12 -Compress)) { $changed = $true }
+                } catch { $changed = $true }
+            }
+            if (-not $changed) { Write-Host "Verified deployed runtimes: $name"; continue }
+            if ($staleRR) { $entries += [ordered]@{ relative = $staleRR; source = $null } }
+            foreach ($runtime in $runtimeSet) {
+                $source = Join-Path $Transaction ($name + '/' + $runtime.name)
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $source) | Out-Null
+                Copy-Item -LiteralPath (Join-Path $sdk ('lib/Windows_x86_64/rel/' + $runtime.name)) -Destination $source
+                if ((Get-Hash $source) -ne $runtime.sha256) { throw 'Staged runtime checksum mismatch.' }
+                $entries += [ordered]@{ relative = $relative + '/' + $runtime.name; source = $source }
+            }
+            $source = Join-Path $Transaction ($name + '/ngx-install.json')
+            Write-Json $modeMetadata $source
+            $entries += [ordered]@{ relative = $relative + '/ngx-install.json'; source = $source }
+        }
+        if ($entries.Count) { Commit-Entries $entries $Transaction }
+        else { Write-Host 'Complete installation and deployed runtimes verified; no changes.' }
+        foreach ($runtime in @($sr,$rr)) { Write-Host "$($runtime.name): version=$($runtime.fileVersion), x64 Release, SHA256=$($runtime.sha256), Authenticode=$($runtime.authenticode)" }
+    }
+} catch {
+    Write-Error "NGX installation aborted; existing installation preserved. $($_.Exception.Message)"
+    exit 1
+} finally {
+    if ($Lock) { $Lock.Dispose() }
+    if ($Transaction -and (Test-Path -LiteralPath $Transaction)) { Remove-Item -LiteralPath $Transaction -Recurse -Force }
+}

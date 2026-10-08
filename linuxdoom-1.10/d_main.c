@@ -57,6 +57,10 @@ static const char rcsid[] = "$Id: d_main.c,v 1.8 1997/02/03 22:45:09 b1 Exp $";
 #include "f_finale.h"
 #include "f_wipe.h"
 
+#ifdef _WIN32
+#include "language.h"
+#include "gbuffer.h"
+#endif
 #include "m_argv.h"
 #include "m_misc.h"
 #include "m_menu.h"
@@ -210,6 +214,9 @@ void D_Display (void)
     if (nodrawers)
 	return;                    // for comparative timing / profiling
 		
+#ifdef _WIN32
+    GB_BeginDisplay();
+#endif
     redrawsbar = false;
     
     // change the view size if needed
@@ -244,6 +251,10 @@ void D_Display (void)
 	    redrawsbar = true;
 	if (inhelpscreensstate && !inhelpscreens)
 	    redrawsbar = true;              // just put away the help screen
+	// Menus can cover the bar. Restore its background before each overlay
+	// and once after closing, including transitions between menu pages.
+	if (menuactive || menuactivestate)
+	    redrawsbar = true;
 	ST_Drawer (viewheight == 200, redrawsbar );
 	fullscreen = viewheight == 200;
 	break;
@@ -314,6 +325,9 @@ void D_Display (void)
 
     // menus go directly to the screen
     M_Drawer ();          // menu is drawn even on top of everything
+#ifdef _WIN32
+    if (inhelpscreens) GB_InvalidateScene();
+#endif
     NetUpdate ();         // send out any new accumulation
 
 
@@ -324,6 +338,10 @@ void D_Display (void)
 	return;
     }
     
+    // Wipes are a 2D transition of complete frames, never an SR scene.
+#ifdef _WIN32
+    GB_InvalidateScene();
+#endif
     // wipe update
     wipe_EndScreen(0, 0, SCREENWIDTH, SCREENHEIGHT);
 
@@ -860,6 +878,9 @@ void D_DoomMain (void)
     char                    file[256];
 
     FindResponseFile ();
+#ifdef _WIN32
+    Lang_InitGame ();
+#endif
 	
     IdentifyVersion ();
 	

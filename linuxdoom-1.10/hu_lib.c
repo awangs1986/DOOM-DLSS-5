@@ -24,6 +24,9 @@ static const char
 rcsid[] = "$Id: hu_lib.c,v 1.3 1997/01/26 07:44:58 b1 Exp $";
 
 #include <ctype.h>
+#ifdef _WIN32
+#include "language.h"
+#endif
 
 #include "doomdef.h"
 
@@ -47,6 +50,7 @@ void HUlib_clearTextLine(hu_textline_t* t)
 {
     t->len = 0;
     t->l[0] = 0;
+    t->codepoints[0] = 0;
     t->needsupdate = true;
 }
 
@@ -62,6 +66,7 @@ HUlib_initTextLine
     t->y = y;
     t->f = f;
     t->sc = sc;
+    t->drawn_height = 0;
     HUlib_clearTextLine(t);
 }
 
@@ -70,17 +75,19 @@ HUlib_addCharToTextLine
 ( hu_textline_t*	t,
   char			ch )
 {
+    return HUlib_addCodepointToTextLine(t, (unsigned char)ch);
+}
 
-    if (t->len == HU_MAXLINELENGTH)
-	return false;
-    else
-    {
-	t->l[t->len++] = ch;
-	t->l[t->len] = 0;
-	t->needsupdate = 4;
-	return true;
-    }
-
+boolean HUlib_addCodepointToTextLine(hu_textline_t *t, uint32_t codepoint)
+{
+    if (t->len == HU_MAXLINELENGTH) return false;
+    t->codepoints[t->len] = codepoint;
+    t->l[t->len] = codepoint < 128 ? (char)codepoint : '?';
+    ++t->len;
+    t->l[t->len] = 0;
+    if (t->len < HU_MAXLINELENGTH) t->codepoints[t->len] = 0;
+    t->needsupdate = 4;
+    return true;
 }
 
 boolean HUlib_delCharFromTextLine(hu_textline_t* t)
@@ -90,6 +97,7 @@ boolean HUlib_delCharFromTextLine(hu_textline_t* t)
     else
     {
 	t->l[--t->len] = 0;
+	t->codepoints[t->len] = 0;
 	t->needsupdate = 4;
 	return true;
     }
@@ -106,12 +114,28 @@ HUlib_drawTextLine
     int			w;
     int			x;
     unsigned char	c;
+    uint32_t		codepoint;
 
     // draw the new stuff
     x = l->x;
     for (i=0;i<l->len;i++)
     {
-	c = toupper(l->l[i]);
+	codepoint = l->codepoints[i];
+	if (codepoint > 0x7f) {
+#ifdef _WIN32
+            const unsigned char *mask;
+            if (Lang_CjkGlyph(codepoint, &mask)) {
+                w = 12;
+                if (x + w > SCREENWIDTH) break;
+                V_DrawCjkGlyph(x, l->y, mask, l->f['A' - l->sc]);
+                if (l->drawn_height < 12) l->drawn_height = 12;
+                x += w;
+                continue;
+            }
+#endif
+            codepoint = '?';
+        }
+	c = toupper((unsigned char)codepoint);
 	if (c != ' '
 	    && c >= l->sc
 	    && c <= '_')
@@ -155,6 +179,7 @@ void HUlib_eraseTextLine(hu_textline_t* l)
 	viewwindowx && l->needsupdate)
     {
 	lh = SHORT(l->f[0]->height) + 1;
+	if (lh < l->drawn_height) lh = l->drawn_height;
 	for (y=l->y,yoffset=y*SCREENWIDTH ; y<l->y+lh ; y++,yoffset+=SCREENWIDTH)
 	{
 	    if (y < viewwindowy || y >= viewwindowy + viewheight)
@@ -169,7 +194,10 @@ void HUlib_eraseTextLine(hu_textline_t* l)
     }
 
     lastautomapactive = automapactive;
-    if (l->needsupdate) l->needsupdate--;
+    if (l->needsupdate) {
+	l->needsupdate--;
+	if (!l->needsupdate) l->drawn_height = 0;
+    }
 
 }
 
@@ -219,6 +247,24 @@ HUlib_addMessageToSText
   char*		prefix,
   char*		msg )
 {
+#ifdef _WIN32
+    char display[HU_MAXLINELENGTH + 1];
+    if (Lang_CjkFontReady()) {
+        const char *p = msg;
+        HUlib_addLineToSText(s);
+        if (prefix)
+            while (*prefix)
+                HUlib_addCodepointToTextLine(&s->l[s->cl], (unsigned char)*(prefix++));
+        while (*p && s->l[s->cl].len < HU_MAXLINELENGTH) {
+            uint32_t cp;
+            int decoded = Lang_DecodeUtf8(&p, &cp);
+            HUlib_addCodepointToTextLine(&s->l[s->cl], decoded < 0 ? '?' : cp);
+        }
+        return;
+    }
+    Lang_MenuText(msg, display, sizeof(display), HU_MAXLINELENGTH, 1);
+    msg = display;
+#endif
     HUlib_addLineToSText(s);
     if (prefix)
 	while (*prefix)
@@ -351,4 +397,3 @@ void HUlib_eraseIText(hu_itext_t* it)
     HUlib_eraseTextLine(&it->l);
     it->laston = *it->on;
 }
-

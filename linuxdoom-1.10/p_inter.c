@@ -46,6 +46,9 @@ rcsid[] = "$Id: p_inter.c,v 1.4 1997/02/03 22:45:11 b1 Exp $";
 #pragma implementation "p_inter.h"
 #endif
 #include "p_inter.h"
+#ifdef _WIN32
+#include "language.h"
+#endif
 
 
 #define BONUSADD	6
@@ -332,6 +335,18 @@ P_GivePower
 
 
 
+/* Player message storage is legacy char*, but the HUD only reads/copies it. */
+static char *P_PickupText(const char *key, char *fallback)
+{
+#ifdef _WIN32
+    (void)fallback;
+    return (char *)Lang_Text(key);
+#else
+    (void)key;
+    return fallback;
+#endif
+}
+
 //
 // P_TouchSpecialThing
 //
@@ -370,13 +385,13 @@ P_TouchSpecialThing
       case SPR_ARM1:
 	if (!P_GiveArmor (player, 1))
 	    return;
-	player->message = GOTARMOR;
+	player->message = P_PickupText("pickup.armor", GOTARMOR);
 	break;
 		
       case SPR_ARM2:
 	if (!P_GiveArmor (player, 2))
 	    return;
-	player->message = GOTMEGA;
+	player->message = P_PickupText("pickup.mega_armor", GOTMEGA);
 	break;
 	
 	// bonus items
@@ -385,7 +400,7 @@ P_TouchSpecialThing
 	if (player->health > 200)
 	    player->health = 200;
 	player->mo->health = player->health;
-	player->message = GOTHTHBONUS;
+	player->message = P_PickupText("pickup.health_bonus", GOTHTHBONUS);
 	break;
 	
       case SPR_BON2:
@@ -394,7 +409,7 @@ P_TouchSpecialThing
 	    player->armorpoints = 200;
 	if (!player->armortype)
 	    player->armortype = 1;
-	player->message = GOTARMBONUS;
+	player->message = P_PickupText("pickup.armor_bonus", GOTARMBONUS);
 	break;
 	
       case SPR_SOUL:
@@ -402,7 +417,7 @@ P_TouchSpecialThing
 	if (player->health > 200)
 	    player->health = 200;
 	player->mo->health = player->health;
-	player->message = GOTSUPER;
+	player->message = P_PickupText("pickup.supercharge", GOTSUPER);
 	sound = sfx_getpow;
 	break;
 	
@@ -412,7 +427,7 @@ P_TouchSpecialThing
 	player->health = 200;
 	player->mo->health = player->health;
 	P_GiveArmor (player,2);
-	player->message = GOTMSPHERE;
+	player->message = P_PickupText("pickup.mega_sphere", GOTMSPHERE);
 	sound = sfx_getpow;
 	break;
 	
@@ -420,7 +435,7 @@ P_TouchSpecialThing
 	// leave cards for everyone
       case SPR_BKEY:
 	if (!player->cards[it_bluecard])
-	    player->message = GOTBLUECARD;
+	    player->message = P_PickupText("pickup.blue_card", GOTBLUECARD);
 	P_GiveCard (player, it_bluecard);
 	if (!netgame)
 	    break;
@@ -428,7 +443,7 @@ P_TouchSpecialThing
 	
       case SPR_YKEY:
 	if (!player->cards[it_yellowcard])
-	    player->message = GOTYELWCARD;
+	    player->message = P_PickupText("pickup.yellow_card", GOTYELWCARD);
 	P_GiveCard (player, it_yellowcard);
 	if (!netgame)
 	    break;
@@ -436,7 +451,7 @@ P_TouchSpecialThing
 	
       case SPR_RKEY:
 	if (!player->cards[it_redcard])
-	    player->message = GOTREDCARD;
+	    player->message = P_PickupText("pickup.red_card", GOTREDCARD);
 	P_GiveCard (player, it_redcard);
 	if (!netgame)
 	    break;
@@ -444,7 +459,7 @@ P_TouchSpecialThing
 	
       case SPR_BSKU:
 	if (!player->cards[it_blueskull])
-	    player->message = GOTBLUESKUL;
+	    player->message = P_PickupText("pickup.blue_skull", GOTBLUESKUL);
 	P_GiveCard (player, it_blueskull);
 	if (!netgame)
 	    break;
@@ -452,7 +467,7 @@ P_TouchSpecialThing
 	
       case SPR_YSKU:
 	if (!player->cards[it_yellowskull])
-	    player->message = GOTYELWSKUL;
+	    player->message = P_PickupText("pickup.yellow_skull", GOTYELWSKUL);
 	P_GiveCard (player, it_yellowskull);
 	if (!netgame)
 	    break;
@@ -460,7 +475,7 @@ P_TouchSpecialThing
 	
       case SPR_RSKU:
 	if (!player->cards[it_redskull])
-	    player->message = GOTREDSKULL;
+	    player->message = P_PickupText("pickup.red_skull", GOTREDSKULL);
 	P_GiveCard (player, it_redskull);
 	if (!netgame)
 	    break;
@@ -470,7 +485,7 @@ P_TouchSpecialThing
       case SPR_STIM:
 	if (!P_GiveBody (player, 10))
 	    return;
-	player->message = GOTSTIM;
+	player->message = P_PickupText("pickup.stimpack", GOTSTIM);
 	break;
 	
       case SPR_MEDI:
@@ -478,9 +493,9 @@ P_TouchSpecialThing
 	    return;
 
 	if (player->health < 25)
-	    player->message = GOTMEDINEED;
+	    player->message = P_PickupText("pickup.medikit_needed", GOTMEDINEED);
 	else
-	    player->message = GOTMEDIKIT;
+	    player->message = P_PickupText("pickup.medikit", GOTMEDIKIT);
 	break;
 
 	
@@ -488,14 +503,14 @@ P_TouchSpecialThing
       case SPR_PINV:
 	if (!P_GivePower (player, pw_invulnerability))
 	    return;
-	player->message = GOTINVUL;
+	player->message = P_PickupText("pickup.invulnerability", GOTINVUL);
 	sound = sfx_getpow;
 	break;
 	
       case SPR_PSTR:
 	if (!P_GivePower (player, pw_strength))
 	    return;
-	player->message = GOTBERSERK;
+	player->message = P_PickupText("pickup.berserk", GOTBERSERK);
 	if (player->readyweapon != wp_fist)
 	    player->pendingweapon = wp_fist;
 	sound = sfx_getpow;
@@ -504,28 +519,28 @@ P_TouchSpecialThing
       case SPR_PINS:
 	if (!P_GivePower (player, pw_invisibility))
 	    return;
-	player->message = GOTINVIS;
+	player->message = P_PickupText("pickup.invisibility", GOTINVIS);
 	sound = sfx_getpow;
 	break;
 	
       case SPR_SUIT:
 	if (!P_GivePower (player, pw_ironfeet))
 	    return;
-	player->message = GOTSUIT;
+	player->message = P_PickupText("pickup.radiation_suit", GOTSUIT);
 	sound = sfx_getpow;
 	break;
 	
       case SPR_PMAP:
 	if (!P_GivePower (player, pw_allmap))
 	    return;
-	player->message = GOTMAP;
+	player->message = P_PickupText("pickup.map", GOTMAP);
 	sound = sfx_getpow;
 	break;
 	
       case SPR_PVIS:
 	if (!P_GivePower (player, pw_infrared))
 	    return;
-	player->message = GOTVISOR;
+	player->message = P_PickupText("pickup.light_visor", GOTVISOR);
 	sound = sfx_getpow;
 	break;
 	
@@ -541,49 +556,49 @@ P_TouchSpecialThing
 	    if (!P_GiveAmmo (player,am_clip,1))
 		return;
 	}
-	player->message = GOTCLIP;
+	player->message = P_PickupText("pickup.clip", GOTCLIP);
 	break;
 	
       case SPR_AMMO:
 	if (!P_GiveAmmo (player, am_clip,5))
 	    return;
-	player->message = GOTCLIPBOX;
+	player->message = P_PickupText("pickup.clip_box", GOTCLIPBOX);
 	break;
 	
       case SPR_ROCK:
 	if (!P_GiveAmmo (player, am_misl,1))
 	    return;
-	player->message = GOTROCKET;
+	player->message = P_PickupText("pickup.rocket", GOTROCKET);
 	break;
 	
       case SPR_BROK:
 	if (!P_GiveAmmo (player, am_misl,5))
 	    return;
-	player->message = GOTROCKBOX;
+	player->message = P_PickupText("pickup.rocket_box", GOTROCKBOX);
 	break;
 	
       case SPR_CELL:
 	if (!P_GiveAmmo (player, am_cell,1))
 	    return;
-	player->message = GOTCELL;
+	player->message = P_PickupText("pickup.cell", GOTCELL);
 	break;
 	
       case SPR_CELP:
 	if (!P_GiveAmmo (player, am_cell,5))
 	    return;
-	player->message = GOTCELLBOX;
+	player->message = P_PickupText("pickup.cell_box", GOTCELLBOX);
 	break;
 	
       case SPR_SHEL:
 	if (!P_GiveAmmo (player, am_shell,1))
 	    return;
-	player->message = GOTSHELLS;
+	player->message = P_PickupText("pickup.shells", GOTSHELLS);
 	break;
 	
       case SPR_SBOX:
 	if (!P_GiveAmmo (player, am_shell,5))
 	    return;
-	player->message = GOTSHELLBOX;
+	player->message = P_PickupText("pickup.shell_box", GOTSHELLBOX);
 	break;
 	
       case SPR_BPAK:
@@ -595,56 +610,56 @@ P_TouchSpecialThing
 	}
 	for (i=0 ; i<NUMAMMO ; i++)
 	    P_GiveAmmo (player, i, 1);
-	player->message = GOTBACKPACK;
+	player->message = P_PickupText("pickup.backpack", GOTBACKPACK);
 	break;
 	
 	// weapons
       case SPR_BFUG:
 	if (!P_GiveWeapon (player, wp_bfg, false) )
 	    return;
-	player->message = GOTBFG9000;
+	player->message = P_PickupText("pickup.bfg", GOTBFG9000);
 	sound = sfx_wpnup;	
 	break;
 	
       case SPR_MGUN:
 	if (!P_GiveWeapon (player, wp_chaingun, special->flags&MF_DROPPED) )
 	    return;
-	player->message = GOTCHAINGUN;
+	player->message = P_PickupText("pickup.chaingun", GOTCHAINGUN);
 	sound = sfx_wpnup;	
 	break;
 	
       case SPR_CSAW:
 	if (!P_GiveWeapon (player, wp_chainsaw, false) )
 	    return;
-	player->message = GOTCHAINSAW;
+	player->message = P_PickupText("pickup.chainsaw", GOTCHAINSAW);
 	sound = sfx_wpnup;	
 	break;
 	
       case SPR_LAUN:
 	if (!P_GiveWeapon (player, wp_missile, false) )
 	    return;
-	player->message = GOTLAUNCHER;
+	player->message = P_PickupText("pickup.launcher", GOTLAUNCHER);
 	sound = sfx_wpnup;	
 	break;
 	
       case SPR_PLAS:
 	if (!P_GiveWeapon (player, wp_plasma, false) )
 	    return;
-	player->message = GOTPLASMA;
+	player->message = P_PickupText("pickup.plasma", GOTPLASMA);
 	sound = sfx_wpnup;	
 	break;
 	
       case SPR_SHOT:
 	if (!P_GiveWeapon (player, wp_shotgun, special->flags&MF_DROPPED ) )
 	    return;
-	player->message = GOTSHOTGUN;
+	player->message = P_PickupText("pickup.shotgun", GOTSHOTGUN);
 	sound = sfx_wpnup;	
 	break;
 		
       case SPR_SGN2:
 	if (!P_GiveWeapon (player, wp_supershotgun, special->flags&MF_DROPPED ) )
 	    return;
-	player->message = GOTSHOTGUN2;
+	player->message = P_PickupText("pickup.super_shotgun", GOTSHOTGUN2);
 	sound = sfx_wpnup;	
 	break;
 		

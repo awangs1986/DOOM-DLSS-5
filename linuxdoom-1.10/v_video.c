@@ -38,6 +38,9 @@ rcsid[] = "$Id: v_video.c,v 1.5 1997/02/03 22:45:13 b1 Exp $";
 #include "m_swap.h"
 
 #include "v_video.h"
+#ifdef _WIN32
+#include "gbuffer.h"
+#endif
 
 
 // Each screen is [SCREENWIDTH*SCREENHEIGHT]; 
@@ -183,6 +186,9 @@ V_CopyRect
     }
 #endif 
     V_MarkRect (destx, desty, width, height); 
+#ifdef _WIN32
+    if (destscrn == 0) GB_MarkOverlayRect(destx, desty, width, height);
+#endif
 	 
     src = screens[srcscrn]+SCREENWIDTH*srcy+srcx; 
     dest = screens[destscrn]+SCREENWIDTH*desty+destx; 
@@ -249,9 +255,12 @@ V_DrawPatch
 	{ 
 	    source = (byte *)column + 3; 
 	    dest = desttop + column->topdelta*SCREENWIDTH; 
-	    count = column->length; 
-			 
-	    while (count--) 
+            count = column->length;
+#ifdef _WIN32
+            if (scrn == 0) GB_MarkOverlayColumn(x, y + column->topdelta, count);
+#endif
+
+            while (count--)
 	    { 
 		*dest = *source++; 
 		dest += SCREENWIDTH; 
@@ -314,9 +323,12 @@ V_DrawPatchFlipped
 	{ 
 	    source = (byte *)column + 3; 
 	    dest = desttop + column->topdelta*SCREENWIDTH; 
-	    count = column->length; 
-			 
-	    while (count--) 
+            count = column->length;
+#ifdef _WIN32
+            if (scrn == 0) GB_MarkOverlayColumn(x, y + column->topdelta, count);
+#endif
+
+            while (count--)
 	    { 
 		*dest = *source++; 
 		dest += SCREENWIDTH; 
@@ -398,6 +410,80 @@ V_DrawPatchDirect
 
 
 //
+/* Find the brightest palette entry present in the classic menu font glyph. */
+static int V_FontInkColor(patch_t *patch)
+{
+    const unsigned char *palette = NULL;
+    int col, width, fallback = -1, selected = -1, brightest = -1;
+    if (!patch) return -1;
+    width = SHORT(patch->width);
+    if (width <= 0 || width > SCREENWIDTH) return -1;
+#ifdef _WIN32
+    /* Use PLAYPAL's ungamma-corrected values. The selected palette index is
+       still written to the indexed framebuffer, so normal gamma stays intact. */
+    palette = GB_BasePaletteRGB();
+#endif
+    for (col = 0; col < width; ++col) {
+        column_t *column = (column_t *)((byte *)patch + LONG(patch->columnofs[col]));
+        while (column->topdelta != 0xff) {
+            int length = column->length;
+            int i;
+            for (i = 0; i < length; ++i) {
+                int color = ((byte *)column)[3 + i];
+                if (fallback < 0) fallback = color;
+                if (palette) {
+                    const unsigned char *rgb = palette + color * 3;
+                    int brightness = 54 * rgb[0] + 183 * rgb[1] + 19 * rgb[2];
+                    if (brightness > brightest) {
+                        brightest = brightness;
+                        selected = color;
+                    }
+                }
+            }
+            column = (column_t *)((byte *)column + length + 4);
+        }
+    }
+    return selected >= 0 ? selected : fallback;
+}
+
+/* Only opaque vertical runs are reported to the G-buffer overlay, like posts
+   in V_DrawPatch. Transparent bitmap pixels remain outside the overlay mask. */
+void V_DrawCjkGlyph(int x, int y, const unsigned char *mask, patch_t *color_reference)
+{
+    int color, col, row, any = 0;
+    if (!mask || !screens[0] || (color = V_FontInkColor(color_reference)) < 0) return;
+    for (col = 0; col < 12; ++col) {
+        int run = -1;
+        int screen_x = x + col;
+        for (row = 0; row <= 12; ++row) {
+            int opaque = 0, screen_y = y + row;
+            if (row < 12 && screen_x >= 0 && screen_x < SCREENWIDTH &&
+                screen_y >= 0 && screen_y < SCREENHEIGHT) {
+                size_t bit = (size_t)row * 12 + col;
+                opaque = (mask[bit / 8] & (0x80 >> (bit & 7))) != 0;
+            }
+            if (opaque) {
+                screens[0][screen_y * SCREENWIDTH + screen_x] = (byte)color;
+                any = 1;
+                if (run < 0) run = screen_y;
+            } else if (run >= 0) {
+#ifdef _WIN32
+                GB_MarkOverlayColumn(screen_x, run, screen_y - run);
+#endif
+                run = -1;
+            }
+        }
+    }
+    if (any) {
+        int left = x < 0 ? 0 : x;
+        int top = y < 0 ? 0 : y;
+        int right = x + 12 > SCREENWIDTH ? SCREENWIDTH : x + 12;
+        int bottom = y + 12 > SCREENHEIGHT ? SCREENHEIGHT : y + 12;
+        if (right > left && bottom > top) V_MarkRect(left, top, right - left, bottom - top);
+    }
+}
+
+
 // V_DrawBlock
 // Draw a linear block of pixels into the view buffer.
 //
@@ -424,6 +510,9 @@ V_DrawBlock
 #endif 
  
     V_MarkRect (x, y, width, height); 
+#ifdef _WIN32
+    if (scrn == 0) GB_MarkOverlayRect(x, y, width, height);
+#endif
  
     dest = screens[scrn] + y*SCREENWIDTH+x; 
 

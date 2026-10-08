@@ -12,6 +12,7 @@ void Fsr2_Shutdown(void);
 int  Fsr2_Ready(void);
 void Fsr2_ApplyRasterJitter(void);
 void Fsr2_RestoreCamera(void);
+void Fsr2_GetRasterJitter(float *x, float *y);
 int  Fsr2_Evaluate(void *cmdlist,
 		   void *color, void *depth, void *velocity, void *output,
 		   int reset);

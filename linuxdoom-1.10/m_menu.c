@@ -35,6 +35,10 @@ rcsid[] = "$Id: m_menu.c,v 1.7 1997/02/03 22:45:10 b1 Exp $";
 
 #include "doomdef.h"
 #include "dstrings.h"
+#include "language.h"
+#ifdef _WIN32
+#include "graphics_settings.h"
+#endif
 
 #include "d_main.h"
 
@@ -69,6 +73,14 @@ extern patch_t*		hu_font[HU_FONTSIZE];
 extern boolean		message_dontfuckwithme;
 
 extern boolean		chat_on;		// in heads-up code
+
+#ifdef _WIN32
+static int M_CodepointWidth(unsigned int codepoint);
+static size_t M_WrapSpan(const char *src, size_t length, char *dst, size_t capacity,
+                         int pixel_width, int max_lines);
+static size_t M_WrapText(const char *src, char *dst, size_t capacity,
+                         int pixel_width, int max_lines);
+#endif
 
 //
 // defaulted values
@@ -131,7 +143,11 @@ boolean			menuactive;
 extern boolean		sendpause;
 char			savegamestrings[10][SAVESTRINGSIZE];
 
-char	endstring[160];
+#ifdef _WIN32
+char	endstring[LANG_MAX_VALUE + 260];
+#else
+char	endstring[256];
+#endif
 
 
 //
@@ -346,9 +362,17 @@ enum
     mousesens,
     option_empty2,
     soundvol,
+#ifdef _WIN32
+    graphics,
+#endif
     opt_end
 } options_e;
 
+#ifdef _WIN32
+static void M_Graphics(int choice);
+static void M_GraphicsToggle(int choice);
+static void M_DrawGraphics(void);
+#endif
 menuitem_t OptionsMenu[]=
 {
     {1,"M_ENDGAM",	M_EndGame,'e'},
@@ -358,7 +382,10 @@ menuitem_t OptionsMenu[]=
     {-1,"",0},
     {2,"M_MSENS",	M_ChangeSensitivity,'m'},
     {-1,"",0},
-    {1,"M_SVOL",	M_Sound,'s'}
+    {1,"M_SVOL",	M_Sound,'s'},
+#ifdef _WIN32
+    {1,"",M_Graphics,'r'}
+#endif
 };
 
 menu_t  OptionsDef =
@@ -367,9 +394,74 @@ menu_t  OptionsDef =
     &MainDef,
     OptionsMenu,
     M_DrawOptions,
+#ifdef _WIN32
+    // The ninth row and its 19-pixel skull must end before the status bar.
+    60,25,
+#else
     60,37,
+#endif
     0
 };
+
+#ifdef _WIN32
+static menuitem_t GraphicsMenu[]={{2,"",M_GraphicsToggle,'r'},{2,"",M_GraphicsToggle,'s'},{2,"",M_GraphicsToggle,'n'}};
+static menu_t GraphicsDef={3,&OptionsDef,GraphicsMenu,M_DrawGraphics,42,46,0};
+static void M_Graphics(int choice){(void)choice;M_SetupNextMenu(&GraphicsDef);}
+static void M_GraphicsToggle(int choice){(void)choice;Graphics_SetRequested(itemOn,!Graphics_Get(itemOn).requested);}
+/* Convert UTF-8 first, then use the same glyph widths as M_WriteText. Each
+   row is bounded in pixels and y; a wide first row cannot eat later rows. */
+static void M_GraphicsText(int x,int y,const char *text,int width,int lines){
+ if(Lang_CjkFontReady()){
+  char wrapped[LANG_MAX_VALUE+1];
+  int available=1+(168-y-12)/12;
+  if(width>SCREENWIDTH-x)width=SCREENWIDTH-x;
+  if(width<=0||available<=0)return;
+  if(lines>available)lines=available;
+  M_WrapText(text,wrapped,sizeof(wrapped),width,lines);
+  M_WriteText(x,y,wrapped);
+  return;
+ }
+ char safe[LANG_MAX_VALUE+1],wrapped[LANG_MAX_VALUE+1];size_t used=0,i=0;int pixels=0,row=1,j,bottom=1;
+ if(width>SCREENWIDTH-x)width=SCREENWIDTH-x;
+ /* M_WriteText advances 12 pixels per newline. Include each patch's
+    actual bottom extent; no graphics text may enter the y168 status bar. */
+ for(j=0;j<HU_FONTSIZE;j++){
+  int extent=SHORT(hu_font[j]->height)-SHORT(hu_font[j]->topoffset);
+  if(extent>bottom)bottom=extent;
+ }
+ if(y+bottom>168||width<=0||lines<=0)return;
+ if(lines>1+(168-y-bottom)/12)lines=1+(168-y-bottom)/12;
+ Lang_MenuText(text,safe,sizeof(safe),LANG_MAX_VALUE,16);
+ while(safe[i]&&used+2<sizeof(wrapped)&&row<=lines){
+  unsigned char c=(unsigned char)safe[i++];int glyph=toupper(c)-HU_FONTSTART;
+  int advance=glyph<0||glyph>=HU_FONTSIZE?4:SHORT(hu_font[glyph]->width);
+  if(c=='\n'||pixels+advance>width){
+   if(row>=lines)break;wrapped[used++]='\n';row++;pixels=0;
+   if(c=='\n')continue;
+  }
+  if(advance>width)continue;wrapped[used++]=(char)c;pixels+=advance;
+ }
+ wrapped[used]=0;M_WriteText(x,y,wrapped);
+}
+static void M_DrawGraphics(void){
+ static const char *labels[]={"graphics.rt","graphics.sr","graphics.nr"};int i;
+ M_GraphicsText(82,15,Lang_Text("graphics.title"),210,1);
+ for(i=0;i<3;i++){
+  GraphicsStatus status=Graphics_Get(i);
+  M_GraphicsText(GraphicsDef.x,GraphicsDef.y+i*LINEHEIGHT,Lang_Text(labels[i]),194,1);
+  M_GraphicsText(246,GraphicsDef.y+i*LINEHEIGHT,Lang_Text(status.requested?"option.state.on":"option.state.off"),64,1);
+ }
+ {
+  GraphicsStatus status=Graphics_Get(itemOn);
+  M_GraphicsText(32,105,Lang_Text("graphics.actual"),72,1);
+  M_GraphicsText(112,105,Lang_Text(Graphics_StateKey(status.state)),198,1);
+  int warning=strcmp(Graphics_PreferenceReason(),"graphics.reason.none")!=0;
+  M_GraphicsText(32,Lang_CjkFontReady()?120:122,Lang_Text(status.reason),278,warning?2:4);
+  if(warning)M_GraphicsText(32,Lang_CjkFontReady()?144:146,Lang_Text(Graphics_PreferenceReason()),278,2);
+ }
+}
+
+#endif
 
 //
 // Read This! MENU 1 & 2
@@ -530,8 +622,12 @@ void M_ReadSaveStrings(void)
 	    continue;
 	}
 	count = read (handle, &savegamestrings[i], SAVESTRINGSIZE);
-	close (handle);
-	LoadMenu[i].status = 1;
+        close(handle);
+        savegamestrings[i][SAVESTRINGSIZE - 1] = 0;
+        if (count != SAVESTRINGSIZE) {
+            strcpy(savegamestrings[i], EMPTYSTRING);
+            LoadMenu[i].status = 0;
+        } else LoadMenu[i].status = 1;
     }
 }
 
@@ -676,7 +772,11 @@ void M_SaveGame (int choice)
 //
 //      M_QuickSave
 //
-char    tempstring[80];
+#ifdef _WIN32
+char    tempstring[LANG_MAX_VALUE + 260];
+#else
+char    tempstring[256];
+#endif
 
 void M_QuickSaveResponse(int ch)
 {
@@ -706,7 +806,15 @@ void M_QuickSave(void)
 	quickSaveSlot = -2;	// means to pick a slot now
 	return;
     }
-    sprintf(tempstring,QSPROMPT,savegamestrings[quickSaveSlot]);
+#ifdef _WIN32
+    {
+        char diag[160];
+        Lang_SaveMessage(0, savegamestrings[quickSaveSlot], tempstring, sizeof(tempstring), diag, sizeof(diag));
+        if (diag[0]) fprintf(stderr, "Language: %s\n", diag);
+    }
+#else
+    snprintf(tempstring, sizeof(tempstring), QSPROMPT, savegamestrings[quickSaveSlot]);
+#endif
     M_StartMessage(tempstring,M_QuickSaveResponse,true);
 }
 
@@ -738,7 +846,15 @@ void M_QuickLoad(void)
 	M_StartMessage(QSAVESPOT,NULL,false);
 	return;
     }
-    sprintf(tempstring,QLPROMPT,savegamestrings[quickSaveSlot]);
+#ifdef _WIN32
+    {
+        char diag[160];
+        Lang_SaveMessage(1, savegamestrings[quickSaveSlot], tempstring, sizeof(tempstring), diag, sizeof(diag));
+        if (diag[0]) fprintf(stderr, "Language: %s\n", diag);
+    }
+#else
+    snprintf(tempstring, sizeof(tempstring), QLPROMPT, savegamestrings[quickSaveSlot]);
+#endif
     M_StartMessage(tempstring,M_QuickLoadResponse,true);
 }
 
@@ -950,13 +1066,37 @@ char	msgNames[2][9]		= {"M_MSGOFF","M_MSGON"};
 
 void M_DrawOptions(void)
 {
+#ifdef _WIN32
+    V_DrawPatchDirect (108,3,0,W_CacheLumpName("M_OPTTTL",PU_CACHE));
+#else
     V_DrawPatchDirect (108,15,0,W_CacheLumpName("M_OPTTTL",PU_CACHE));
+#endif
 	
+#ifdef _WIN32
+    if (Lang_HasTranslation(detailLevel ? "option.detail.low" : "option.detail.high")) {
+        char label[20];
+        if (Lang_CjkFontReady())
+            M_WrapText(Lang_Text(detailLevel ? "option.detail.low" : "option.detail.high"), label, sizeof(label), 84, 1);
+        else
+            Lang_MenuText(Lang_Text(detailLevel ? "option.detail.low" : "option.detail.high"), label, sizeof(label), 8, 1);
+        M_WriteText(OptionsDef.x + 175, OptionsDef.y + LINEHEIGHT * detail, label);
+    } else
+#endif
     V_DrawPatchDirect (OptionsDef.x + 175,OptionsDef.y+LINEHEIGHT*detail,0,
-		       W_CacheLumpName(detailNames[detailLevel],PU_CACHE));
+                       W_CacheLumpName(detailNames[detailLevel],PU_CACHE));
 
+#ifdef _WIN32
+    if (Lang_HasTranslation(showMessages ? "option.state.on" : "option.state.off")) {
+        char label[20];
+        if (Lang_CjkFontReady())
+            M_WrapText(Lang_Text(showMessages ? "option.state.on" : "option.state.off"), label, sizeof(label), 96, 1);
+        else
+            Lang_MenuText(Lang_Text(showMessages ? "option.state.on" : "option.state.off"), label, sizeof(label), 12, 1);
+        M_WriteText(OptionsDef.x + 120, OptionsDef.y + LINEHEIGHT * messages, label);
+    } else
+#endif
     V_DrawPatchDirect (OptionsDef.x + 120,OptionsDef.y+LINEHEIGHT*messages,0,
-		       W_CacheLumpName(msgNames[showMessages],PU_CACHE));
+                       W_CacheLumpName(msgNames[showMessages],PU_CACHE));
 
     M_DrawThermo(OptionsDef.x,OptionsDef.y+LINEHEIGHT*(mousesens+1),
 		 10,mouseSensitivity);
@@ -981,10 +1121,14 @@ void M_ChangeMessages(int choice)
     choice = 0;
     showMessages = 1 - showMessages;
 	
+#ifdef _WIN32
+    players[consoleplayer].message = (char *)Lang_Text(showMessages ? "option.messages.on" : "option.messages.off");
+#else
     if (!showMessages)
-	players[consoleplayer].message = MSGOFF;
+        players[consoleplayer].message = MSGOFF;
     else
-	players[consoleplayer].message = MSGON ;
+        players[consoleplayer].message = MSGON;
+#endif
 
     message_dontfuckwithme = true;
 }
@@ -1097,13 +1241,17 @@ void M_QuitResponse(int ch)
 
 void M_QuitDOOM(int choice)
 {
-  // We pick index 0 which is language sensitive,
-  //  or one at random, between 1 and maximum number.
-  if (language != english )
-    sprintf(endstring,"%s\n\n"DOSY, endmsg[0] );
+#ifdef _WIN32
+  Lang_QuitMessage(endstring, sizeof(endstring));
+#else
+  // Retain original static text behavior for the historical Linux build.
+  if (language != english)
+    snprintf(endstring, sizeof(endstring), "%s\n\n" DOSY, endmsg[0]);
   else
-    sprintf(endstring,"%s\n\n"DOSY, endmsg[ (gametic%(NUM_QUITMESSAGES-2))+1 ]);
-  
+    snprintf(endstring, sizeof(endstring), "%s\n\n" DOSY,
+             endmsg[(gametic % (NUM_QUITMESSAGES - 2)) + 1]);
+#endif
+
   M_StartMessage(endstring,M_QuitResponse,true);
 }
 
@@ -1224,6 +1372,72 @@ M_DrawSelCell
 }
 
 
+#ifdef _WIN32
+static unsigned int M_NormalizeAscii(unsigned int codepoint)
+{
+    if (codepoint == '\t') return ' ';
+    if (codepoint != '\n' && (codepoint < 32 || codepoint == 96 || codepoint > 122))
+        return '?';
+    return codepoint;
+}
+
+static int M_CodepointWidth(unsigned int codepoint)
+{
+    const unsigned char *mask;
+    int glyph;
+    if (codepoint > 0x7f)
+        return Lang_CjkGlyph((uint32_t)codepoint, &mask) ? 12 : M_CodepointWidth('?');
+    codepoint = M_NormalizeAscii(codepoint);
+    glyph = toupper((unsigned char)codepoint) - HU_FONTSTART;
+    if (glyph < 0 || glyph >= HU_FONTSIZE) return 4;
+    return SHORT(hu_font[glyph]->width);
+}
+
+static size_t M_WrapSpan(const char *src, size_t length, char *dst, size_t capacity,
+                         int pixel_width, int max_lines)
+{
+    const char *p = src, *end;
+    size_t used = 0;
+    int pixels = 0, lines = 1;
+    if (!capacity) return 0;
+    dst[0] = 0;
+    if (!src || pixel_width <= 0 || max_lines <= 0) return 0;
+    end = src + length;
+    while (p < end && used + 1 < capacity && lines <= max_lines) {
+        const char *start = p;
+        uint32_t cp;
+        int decoded = Lang_DecodeUtf8(&p, &cp);
+        size_t bytes = (size_t)(p - start);
+        int advance;
+        if (p > end) { p = end; cp = '?'; decoded = -1; bytes = 1; }
+        if (decoded < 0) { cp = '?'; bytes = 1; }
+        if (cp == '\n') {
+            if (lines == max_lines) break;
+            dst[used++] = '\n'; ++lines; pixels = 0; continue;
+        }
+        advance = M_CodepointWidth(cp);
+        if (pixels && pixels + advance > pixel_width) {
+            if (lines == max_lines || used + 1 >= capacity) break;
+            dst[used++] = '\n'; ++lines; pixels = 0;
+        }
+        if (used + bytes >= capacity) break;
+        if (decoded < 0) dst[used++] = '?';
+        else { memcpy(dst + used, start, bytes); used += bytes; }
+        pixels += advance;
+    }
+    dst[used] = 0;
+    return used;
+}
+
+static size_t M_WrapText(const char *src, char *dst, size_t capacity,
+                         int pixel_width, int max_lines)
+{
+    if (!capacity) return 0;
+    if (!src) { dst[0] = 0; return 0; }
+    return M_WrapSpan(src, strlen(src), dst, capacity, pixel_width, max_lines);
+}
+#endif
+
 void
 M_StartMessage
 ( char*		string,
@@ -1232,7 +1446,34 @@ M_StartMessage
 {
     messageLastMenuActive = menuactive;
     messageToPrint = 1;
+#ifdef _WIN32
+    if (Lang_CjkFontReady()) {
+        static char display[LANG_MAX_VALUE + 260];
+        const char *last_break = NULL, *scan = string;
+        size_t used;
+        if (input && string) {
+            while ((scan = strstr(scan, "\n\n")) != NULL) {
+                last_break = scan;
+                scan += 2;
+            }
+        }
+        if (last_break) {
+            used = M_WrapSpan(string, (size_t)(last_break - string), display,
+                              sizeof(display), 240, 5);
+            if (used + 2 < sizeof(display)) {
+                display[used++] = '\n'; display[used++] = '\n'; display[used] = 0;
+                M_WrapText(last_break + 2, display + used, sizeof(display) - used, 240, 2);
+            }
+        } else M_WrapText(string, display, sizeof(display), 240, 8);
+        messageString = display;
+    } else {
+        static char display[256];
+        Lang_MenuText(string, display, sizeof(display), 30, 8);
+        messageString = display;
+    }
+#else
     messageString = string;
+#endif
     messageRoutine = routine;
     messageNeedsInput = input;
     menuactive = true;
@@ -1257,10 +1498,23 @@ int M_StringWidth(char* string)
     int             i;
     int             w = 0;
     int             c;
-	
+#ifdef _WIN32
+    if (Lang_CjkFontReady()) {
+        const char *p = string;
+        uint32_t cp;
+        int decoded;
+        while ((decoded = Lang_DecodeUtf8(&p, &cp)) != 0)
+            w += M_CodepointWidth(decoded < 0 ? '?' : cp);
+        return w;
+    }
+    char display[LANG_MAX_VALUE + 1];
+    Lang_MenuText(string, display, sizeof(display), LANG_MAX_VALUE, 1);
+    string = display;
+#endif
+
     for (i = 0;i < strlen(string);i++)
     {
-	c = toupper(string[i]) - HU_FONTSTART;
+	c = toupper((unsigned char)string[i]) - HU_FONTSTART;
 	if (c < 0 || c >= HU_FONTSIZE)
 	    w += 4;
 	else
@@ -1272,6 +1526,20 @@ int M_StringWidth(char* string)
 
 
 
+#ifdef _WIN32
+static int M_TextLineHeight(const char *string)
+{
+    const char *p = string;
+    uint32_t cp;
+    int decoded;
+    while (p && *p && *p != '\n') {
+        decoded = Lang_DecodeUtf8(&p, &cp);
+        if (decoded > 0 && cp > 0x7f && Lang_CjkGlyph(cp, NULL)) return 12;
+    }
+    return SHORT(hu_font[0]->height);
+}
+#endif
+
 //
 //      Find string height from hu_font chars
 //
@@ -1279,8 +1547,21 @@ int M_StringHeight(char* string)
 {
     int             i;
     int             h;
-    int             height = SHORT(hu_font[0]->height);
+	int             height = SHORT(hu_font[0]->height);
 	
+#ifdef _WIN32
+    if (Lang_CjkFontReady()) {
+        const char *p = string, *line = string;
+        h = M_TextLineHeight(line);
+        while (*p) {
+            if (*p++ == '\n') {
+                line = p;
+                h += M_TextLineHeight(line);
+            }
+        }
+        return h;
+    }
+#endif
     h = height;
     for (i = 0;i < strlen(string);i++)
 	if (string[i] == '\n')
@@ -1306,13 +1587,49 @@ M_WriteText
     int		cy;
 		
 
+#ifdef _WIN32
+    if (Lang_CjkFontReady()) {
+        const char *p = string;
+        uint32_t cp;
+        int decoded;
+        cx = x; cy = y;
+        while ((decoded = Lang_DecodeUtf8(&p, &cp)) != 0) {
+            int width;
+            const unsigned char *mask = NULL;
+            if (decoded < 0) cp = '?';
+            if (cp == '\n') { cx = x; cy += 12; continue; }
+            if (cp > 0x7f && Lang_CjkGlyph(cp, &mask)) {
+                width = 12;
+                if (cx + width > SCREENWIDTH) break;
+                V_DrawCjkGlyph(cx, cy, mask, hu_font['A' - HU_FONTSTART]);
+                cx += width;
+                continue;
+            }
+            cp = M_NormalizeAscii(cp > 0x7f ? '?' : cp);
+            width = M_CodepointWidth(cp);
+            if (cx + width > SCREENWIDTH) break;
+            c = toupper((unsigned char)cp) - HU_FONTSTART;
+            if (c >= 0 && c < HU_FONTSIZE)
+                V_DrawPatchDirect(cx, cy, 0, hu_font[c]);
+            cx += width;
+        }
+        return;
+    }
+    {
+        /* Conversion is shared with measurement; raw UTF-8 is never cased. */
+        static char display[LANG_MAX_VALUE + 1];
+        Lang_MenuText(string, display, sizeof(display), LANG_MAX_VALUE, 16);
+        ch = display;
+    }
+#else
     ch = string;
+#endif
     cx = x;
     cy = y;
 	
     while(1)
     {
-	c = *ch++;
+	c = (unsigned char)*ch++;
 	if (!c)
 	    break;
 	if (c == '\n')
@@ -1599,7 +1916,15 @@ boolean M_Responder (event_t* ev)
 	    usegamma++;
 	    if (usegamma > 4)
 		usegamma = 0;
-	    players[consoleplayer].message = gammamsg[usegamma];
+#ifdef _WIN32
+            {
+                char key[32];
+                snprintf(key, sizeof(key), "option.gamma.%d", usegamma);
+                players[consoleplayer].message = (char *)Lang_Text(key);
+            }
+#else
+            players[consoleplayer].message = gammamsg[usegamma];
+#endif
 	    I_SetPalette (W_CacheLumpName ("PLAYPAL",PU_CACHE));
 	    return true;
 				
@@ -1744,7 +2069,7 @@ void M_Drawer (void)
     static short	y;
     short		i;
     short		max;
-    char		string[40];
+    char		string[LANG_MAX_VALUE + 260];
     int			start;
 
     inhelpscreens = false;
@@ -1757,24 +2082,18 @@ void M_Drawer (void)
 	y = 100 - M_StringHeight(messageString)/2;
 	while(*(messageString+start))
 	{
-	    for (i = 0;i < strlen(messageString+start);i++)
-		if (*(messageString+start+i) == '\n')
-		{
-		    memset(string,0,40);
-		    strncpy(string,messageString+start,i);
-		    start += i+1;
-		    break;
-		}
-				
-	    if (i == strlen(messageString+start))
-	    {
-		strcpy(string,messageString+start);
-		start += i;
-	    }
-				
+            size_t length = 0, copied;
+            while (messageString[start + length] && messageString[start + length] != '\n')
+                ++length;
+            copied = length < sizeof(string) - 1 ? length : sizeof(string) - 1;
+            memcpy(string, messageString + start, copied);
+            string[copied] = 0;
+            start += (int)length;
+            if (messageString[start] == '\n') ++start;
+
 	    x = 160 - M_StringWidth(string)/2;
 	    M_WriteText(x,y,string);
-	    y += SHORT(hu_font[0]->height);
+	    y += M_StringHeight(string);
 	}
 	return;
     }
@@ -1792,8 +2111,21 @@ void M_Drawer (void)
 
     for (i=0;i<max;i++)
     {
-	if (currentMenu->menuitems[i].name[0])
-	    V_DrawPatchDirect (x,y,0,
+#ifdef _WIN32
+        if (currentMenu == &OptionsDef && i == graphics) {
+            M_GraphicsText(x,y,Lang_Text("graphics.title"),SCREENWIDTH-x-8,1);
+        } else
+        if (currentMenu == &OptionsDef && i == messages && Lang_HasTranslation("menu.messages")) {
+            char label[32];
+            if (Lang_CjkFontReady())
+                M_WrapText(Lang_Text("menu.messages"), label, sizeof(label), 104, 1);
+            else
+                Lang_MenuText(Lang_Text("menu.messages"), label, sizeof(label), 13, 1);
+            M_WriteText(x, y, label);
+        } else
+#endif
+        if (currentMenu->menuitems[i].name[0])
+            V_DrawPatchDirect (x,y,0,
 			       W_CacheLumpName(currentMenu->menuitems[i].name ,PU_CACHE));
 	y += LINEHEIGHT;
     }
@@ -1891,4 +2223,3 @@ void M_Init (void)
     }
     
 }
-

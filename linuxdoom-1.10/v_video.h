@@ -82,6 +82,9 @@ V_DrawPatchDirect
   int		scrn,
   patch_t*	patch );
 
+/* Draw a 12x12 1bpp glyph; transparent pixels do not enter the RT overlay. */
+void V_DrawCjkGlyph(int x, int y, const unsigned char *mask, patch_t *color_reference);
+
 
 // Draw a linear block of pixels into the view buffer.
 void

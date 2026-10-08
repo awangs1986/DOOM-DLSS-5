@@ -23,6 +23,7 @@
 
 // We are referring to patches.
 #include "r_defs.h"
+#include <stdint.h>
 
 
 // background and foreground screen numbers
@@ -51,7 +52,9 @@ typedef struct
     patch_t**	f;			// font
     int		sc;			// start character
     char	l[HU_MAXLINELENGTH+1];	// line of text
+    uint32_t codepoints[HU_MAXLINELENGTH]; // display units; chat input remains byte ASCII
     int		len;		      	// current line length
+    int		drawn_height;		// tallest glyph still needing erase
 
     // whether this line needs to be udpated
     int		needsupdate;	      
@@ -110,6 +113,7 @@ void	HUlib_initTextLine(hu_textline_t *t, int x, int y, patch_t **f, int sc);
 
 // returns success
 boolean HUlib_addCharToTextLine(hu_textline_t *t, char ch);
+boolean HUlib_addCodepointToTextLine(hu_textline_t *t, uint32_t codepoint);
 
 // returns success
 boolean HUlib_delCharFromTextLine(hu_textline_t *t);

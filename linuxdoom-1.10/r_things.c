@@ -43,6 +43,8 @@ rcsid[] = "$Id: r_things.c,v 1.5 1997/02/03 16:47:56 b1 Exp $";
 
 #ifdef _WIN32
 #include "gbuffer.h"
+#include "fsr2.h"
+#include "v_video.h"
 
 static fixed_t vis_momx[MAXVISSPRITES];
 static fixed_t vis_momy[MAXVISSPRITES];
@@ -393,7 +395,7 @@ void R_DrawMaskedColumn (column_t* column)
 	    // dc_source = (byte *)column + 3 - column->topdelta;
 
 #ifdef _WIN32
-	    {
+	    if (GB_MaterialContextKind() != GB_KIND_WALL) {
 		float z;
 		int an;
 		if (spryscale <= 256)
@@ -437,6 +439,9 @@ R_DrawVisSprite
     patch_t*		patch;
 	
 	
+#ifdef _WIN32
+    GB_SetMaterialContext(GB_KIND_SPRITE,(unsigned)vis->patch);
+#endif
     patch = W_CacheLumpNum (vis->patch+firstspritelump, PU_CACHE);
 
     dc_colormap = vis->colormap;
@@ -1058,11 +1063,17 @@ void R_DrawMasked (void)
 	if (ds->maskedtexturecol)
 	    R_RenderMaskedSegRange (ds, ds->x1, ds->x2);
     
+#ifdef _WIN32
+    /* The world behind the weapon is genuinely rendered before this boundary.
+     * Subsequent column/patch writes record explicit 2D coverage only. */
+    GB_CaptureScene(screens[0]);
+    /* Frame rays are frozen; weapon/UI keep the unjittered projection. */
+    Fsr2_RestoreCamera();
+#endif
     // draw the psprites on top of everything
     //  but does not draw on side views
     if (!viewangleoffset)		
 	R_DrawPlayerSprites ();
 }
-
 
 

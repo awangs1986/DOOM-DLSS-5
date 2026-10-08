@@ -1,7 +1,7 @@
 # WinDoom: Windows x64 build of Linux DOOM 1.10.
 # Copyright (C) 2026 Nikolai Zhivotenko. Licensed under GPLv2 (LICENSE.TXT).
-cmake_minimum_required(VERSION 3.16)
-project(windoom C)
+cmake_minimum_required(VERSION 3.20)
+project(windoom C CXX)
 
 if(NOT WIN32)
   message(FATAL_ERROR "windoom is a Windows x64 target")
@@ -9,6 +9,8 @@ endif()
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(DOOM_DIR ${CMAKE_SOURCE_DIR}/linuxdoom-1.10)
 
@@ -26,6 +28,7 @@ set(DOOM_SOURCES
   ${DOOM_DIR}/hu_lib.c
   ${DOOM_DIR}/hu_stuff.c
   ${DOOM_DIR}/info.c
+  ${DOOM_DIR}/language.c
   ${DOOM_DIR}/m_argv.c
   ${DOOM_DIR}/m_bbox.c
   ${DOOM_DIR}/m_cheat.c
@@ -55,6 +58,7 @@ set(DOOM_SOURCES
   ${DOOM_DIR}/p_user.c
   ${DOOM_DIR}/r_bsp.c
   ${DOOM_DIR}/r_data.c
+  ${DOOM_DIR}/r_material_copy.c
   ${DOOM_DIR}/r_draw.c
   ${DOOM_DIR}/r_main.c
   ${DOOM_DIR}/r_plane.c
@@ -74,13 +78,28 @@ set(DOOM_SOURCES
 
 add_executable(windoom
   ${DOOM_SOURCES}
+  win32/graphics_settings.c
+  win32/nr_control.cpp
+  win32/frame_inputs.c
+  win32/frame_trace.c
   win32/gbuffer.c
+  win32/dxr_diagnostic.cpp
+  win32/dxr_map.cpp
+  win32/dxr_lighting.cpp
+  win32/dxr_reflection.cpp
+  win32/reflection_config.c
+  win32/rt_materials.cpp
+  win32/map_mesh.cpp
+  win32/map_source.c
+  win32/render_adapter.c
+  win32/gpu_timing.c
   win32/i_main_win.c
   win32/i_net_win.c
   win32/i_sound_win.c
   win32/i_system_win.c
   win32/i_video_win.c
   win32/ngx_dlss.c
+  win32/ngx_runtime.c
   win32/anime4k.c
   win32/fsr2.c
   win32/png_export.c
@@ -110,6 +129,7 @@ if(MSVC)
     /wd4101
     /FIstrings.h
     /FIalloca.h
+    $<$<COMPILE_LANGUAGE:CXX>:/EHsc>
   )
 endif()
 
@@ -120,8 +140,13 @@ target_link_libraries(windoom PRIVATE
   ole32
   uuid
   windowscodecs
+  bcrypt
+  version
+  advapi32
+  imm32
 )
 
+option(WINDOOM_NGX_DIAGNOSTICS "Enable explicitly labelled NGX failure injection for acceptance captures" OFF)
 option(WINDOOM_NGX "Link NVIDIA NGX (needs a local SDK; off by default)" OFF)
 option(WINDOOM_ANIME4K "Compile Anime4K Fast present path (no NVIDIA)" OFF)
 option(WINDOOM_FSR2 "Compile AMD FSR 2.2 present path (needs fetched sources)" OFF)
@@ -161,7 +186,24 @@ if(WINDOOM_NGX)
     PATH_SUFFIXES lib/Windows_x86_64/x64 lib/x64 lib)
   if(NGX_INCLUDE_DIR AND NGX_LIBRARY)
     message(STATUS "NGX enabled: ${NGX_INCLUDE_DIR}")
-    target_compile_definitions(windoom PRIVATE WINDOOM_HAS_NGX)
+    set(_ngx_build_tag "unrecorded")
+    set(_ngx_build_commit "unrecorded")
+    if(EXISTS "${NGX_INCLUDE_DIR}/../ngx-install.json")
+      file(STRINGS "${NGX_INCLUDE_DIR}/../ngx-install.json" _ngx_sdk_lines REGEX "\"(sdkTag|commit)\"")
+      foreach(_ngx_line IN LISTS _ngx_sdk_lines)
+        if(_ngx_line MATCHES "\"sdkTag\"[ ]*:[ ]*\"(v[0-9.]+)\"")
+          set(_ngx_build_tag "${CMAKE_MATCH_1}")
+        elseif(_ngx_line MATCHES "\"commit\"[ ]*:[ ]*\"([a-f0-9]+)\"")
+          set(_ngx_build_commit "${CMAKE_MATCH_1}")
+        endif()
+      endforeach()
+    endif()
+    target_compile_definitions(windoom PRIVATE WINDOOM_HAS_NGX
+      WINDOOM_NGX_BUILD_SDK_TAG="${_ngx_build_tag}"
+      WINDOOM_NGX_BUILD_SDK_COMMIT="${_ngx_build_commit}")
+    if(WINDOOM_NGX_DIAGNOSTICS)
+      target_compile_definitions(windoom PRIVATE WINDOOM_NGX_DIAGNOSTICS)
+    endif()
     target_include_directories(windoom PRIVATE ${NGX_INCLUDE_DIR})
     target_link_libraries(windoom PRIVATE ${NGX_LIBRARY})
   else()
@@ -185,3 +227,75 @@ if(WINDOOM_FSR2)
   endif()
   target_link_libraries(windoom PRIVATE ffx_fsr2_api ffx_fsr2_dx12)
 endif()
+
+# Resource lookup is relative to the executable, including direct CMake builds.
+add_custom_command(TARGET windoom POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    "${CMAKE_SOURCE_DIR}/languages" "$<TARGET_FILE_DIR:windoom>/languages"
+)
+
+# Inline ray queries require DXIL/Shader Model 6.5. Missing DXC leaves normal
+# rendering available; runtime diagnostic reports the absent shader.
+option(WINDOOM_DXR "Build the DXR inline-ray diagnostic shader when DXC is available" ON)
+if(WINDOOM_DXR)
+  file(GLOB _wd_dxc_paths "C:/Program Files (x86)/Windows Kits/10/bin/*/x64")
+  list(SORT _wd_dxc_paths ORDER DESCENDING)
+  find_program(DXC_EXECUTABLE NAMES dxc.exe dxc HINTS ${_wd_dxc_paths})
+  if(DXC_EXECUTABLE)
+    # Generate directly beside the executable: shader-only rebuilds must also
+    # refresh the runtime asset even when windoom does not relink.
+    get_target_property(_wd_runtime_dir windoom RUNTIME_OUTPUT_DIRECTORY)
+    if(NOT _wd_runtime_dir)
+      set(_wd_runtime_dir "${CMAKE_CURRENT_BINARY_DIR}")
+    endif()
+    if(CMAKE_CONFIGURATION_TYPES AND NOT _wd_runtime_dir MATCHES "\\$<")
+      string(APPEND _wd_runtime_dir "/$<CONFIG>")
+    endif()
+    set(_wd_dxr_shader "${_wd_runtime_dir}/shaders/dxr_diagnostic.cso")
+    add_custom_command(OUTPUT "${_wd_dxr_shader}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_wd_runtime_dir}/shaders"
+      COMMAND "${DXC_EXECUTABLE}" -T cs_6_5 -E main -O3
+        -Fo "${_wd_dxr_shader}" "${CMAKE_CURRENT_SOURCE_DIR}/win32/shaders/dxr/diagnostic.hlsl"
+      DEPENDS win32/shaders/dxr/diagnostic.hlsl VERBATIM)
+    add_custom_target(windoom_dxr_shader DEPENDS "${_wd_dxr_shader}")
+    add_dependencies(windoom windoom_dxr_shader)
+    set(_wd_map_shader "${_wd_runtime_dir}/shaders/dxr_map.cso")
+    add_custom_command(OUTPUT "${_wd_map_shader}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_wd_runtime_dir}/shaders"
+      COMMAND "${DXC_EXECUTABLE}" -T cs_6_5 -E main -O3
+        -Fo "${_wd_map_shader}" "${CMAKE_CURRENT_SOURCE_DIR}/win32/shaders/dxr/map.hlsl"
+      DEPENDS win32/shaders/dxr/map.hlsl win32/shaders/dxr/scene-hit.hlsli VERBATIM)
+    add_custom_target(windoom_map_shader DEPENDS "${_wd_map_shader}")
+    add_dependencies(windoom windoom_map_shader)
+    set(_wd_light_shader "${_wd_runtime_dir}/shaders/dxr_lighting.cso")
+    add_custom_command(OUTPUT "${_wd_light_shader}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${_wd_runtime_dir}/shaders"
+      COMMAND "${DXC_EXECUTABLE}" -T cs_6_5 -E main -O3
+        -Fo "${_wd_light_shader}" "${CMAKE_CURRENT_SOURCE_DIR}/win32/shaders/dxr/lighting.hlsl"
+      DEPENDS win32/shaders/dxr/lighting.hlsl win32/shaders/dxr/scene-hit.hlsli
+        win32/shaders/dxr/rt-material-layout.hlsli win32/shaders/dxr/material-sample.hlsli
+        win32/shaders/dxr/alpha-trace.hlsli VERBATIM)
+    add_custom_target(windoom_light_shader DEPENDS "${_wd_light_shader}")
+    add_dependencies(windoom windoom_light_shader)
+    foreach(_wd_reflection_entry trace compose)
+      set(_wd_reflection_shader "${_wd_runtime_dir}/shaders/dxr_reflection_${_wd_reflection_entry}.cso")
+      add_custom_command(OUTPUT "${_wd_reflection_shader}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_wd_runtime_dir}/shaders"
+        COMMAND "${DXC_EXECUTABLE}" -T cs_6_5 -E "${_wd_reflection_entry}" -O3
+          -Fo "${_wd_reflection_shader}" "${CMAKE_CURRENT_SOURCE_DIR}/win32/shaders/dxr/reflection.hlsl"
+        DEPENDS win32/shaders/dxr/reflection.hlsl win32/shaders/dxr/scene-hit.hlsli
+          win32/shaders/dxr/alpha-trace.hlsli win32/shaders/dxr/material-sample.hlsli
+          win32/shaders/dxr/rt-material-layout.hlsli VERBATIM)
+      add_custom_target(windoom_reflection_${_wd_reflection_entry}_shader DEPENDS "${_wd_reflection_shader}")
+      add_dependencies(windoom windoom_reflection_${_wd_reflection_entry}_shader)
+    endforeach()
+    message(STATUS "DXR diagnostic DXC: ${DXC_EXECUTABLE}")
+  else()
+    message(STATUS "DXC absent; normal rendering works, DXR diagnostic shader unavailable")
+  endif()
+endif()
+
+# Configure-only examples. Do not replace per-stage local effect values.
+add_custom_command(TARGET windoom POST_BUILD
+  COMMAND ${CMAKE_COMMAND} "-DSOURCE=${CMAKE_SOURCE_DIR}"
+    "-DDEST=$<TARGET_FILE_DIR:windoom>" -P "${CMAKE_SOURCE_DIR}/tools/stage-effect-defaults.cmake")

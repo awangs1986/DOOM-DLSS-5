@@ -1,5 +1,6 @@
 /* Copyright (C) 2026 Nikolai Zhivotenko. GPLv2; see LICENSE.TXT. */
 #include "fsr2.h"
+#include "gbuffer.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +21,7 @@ extern "C" {
 #include "doomdef.h"
 #include "r_main.h"
 #include "r_state.h"
+#include "r_plane.h"
 #include "tables.h"
 #ifdef __cplusplus
 }
@@ -59,6 +61,7 @@ static int g_saved_centery;
 static fixed_t g_saved_centeryfrac;
 static fixed_t g_saved_viewsin;
 static fixed_t g_saved_viewcos;
+static fixed_t g_saved_yslope[GB_HEIGHT];
 static void *g_scratch;
 static FfxFsr2Context g_ctx;
 static FfxFsr2Interface g_iface;
@@ -137,6 +140,7 @@ int Fsr2_Init(void *device)
 
     g_inited = 1;
     fprintf(stderr, "FSR2: ready 320x200 -> 1280x800 (Halton jitter)\n");
+    fprintf(stderr, "FSR2 input depth: R32_FLOAT conventional device-Z near=0 far=1 view_planes=%.0f/%.0f depth_inverted=0 depth_infinite=0\n", GB_TEMPORAL_NEAR, GB_TEMPORAL_FAR);
     return 1;
 }
 
@@ -153,7 +157,7 @@ int Fsr2_Ready(void)
 void Fsr2_ApplyRasterJitter(void)
 {
     int32_t phases;
-    int cx;
+    int cx, y;
     float pixel_ang;
     float yoff;
 
@@ -173,6 +177,7 @@ void Fsr2_ApplyRasterJitter(void)
     g_saved_centeryfrac = centeryfrac;
     g_saved_viewsin = viewsin;
     g_saved_viewcos = viewcos;
+    memcpy(g_saved_yslope, yslope, sizeof(g_saved_yslope));
 
     cx = centerx;
     if (cx < 0)
@@ -180,14 +185,24 @@ void Fsr2_ApplyRasterJitter(void)
     if (cx >= SCREENWIDTH)
 	cx = SCREENWIDTH - 1;
     pixel_ang = (float)(int)(xtoviewangle[cx] - xtoviewangle[cx + 1]);
-    viewangle += (angle_t)(g_jx * pixel_ang);
+    viewangle += (angle_t)(int)(g_jx * pixel_ang);
     viewsin = finesine[viewangle >> ANGLETOFINESHIFT];
     viewcos = finecosine[viewangle >> ANGLETOFINESHIFT];
 
     yoff = g_jy * (float)FRACUNIT;
     centeryfrac += (fixed_t)yoff;
     centery = centeryfrac >> FRACBITS;
+    for (y = 0; y < viewheight; y++) {
+        fixed_t dy = abs((y << FRACBITS) + FRACUNIT / 2 - centeryfrac);
+        if (dy < 1) dy = 1;
+        yslope[y] = FixedDiv(projection, dy);
+    }
     g_jittered = 1;
+}
+
+void Fsr2_GetRasterJitter(float *x, float *y)
+{
+    *x = g_jx; *y = g_jy;
 }
 
 void Fsr2_RestoreCamera(void)
@@ -199,6 +214,7 @@ void Fsr2_RestoreCamera(void)
     centeryfrac = g_saved_centeryfrac;
     viewsin = g_saved_viewsin;
     viewcos = g_saved_viewcos;
+    memcpy(yslope, g_saved_yslope, sizeof(g_saved_yslope));
     g_jittered = 0;
 }
 
@@ -225,21 +241,21 @@ int Fsr2_Evaluate(void *cmdlist, void *color, void *depth, void *velocity,
 					 FFX_RESOURCE_STATE_COMPUTE_READ);
     d.output = ffxGetResourceDX12(&g_ctx, (ID3D12Resource *)output, L"Output",
 				  FFX_RESOURCE_STATE_UNORDERED_ACCESS);
-    d.jitterOffset.x = g_jx;
-    d.jitterOffset.y = g_jy;
+    d.jitterOffset.x = GB_GetFrameInputs()->jitter_x;
+    d.jitterOffset.y = GB_GetFrameInputs()->jitter_y;
     d.motionVectorScale.x = 1.0f;
     d.motionVectorScale.y = 1.0f;
     d.renderSize.width = FSR2_IN_W;
     d.renderSize.height = FSR2_IN_H;
     d.enableSharpening = false;
     d.sharpness = 0.0f;
-    d.frameTimeDelta = 1000.0f / 35.0f;
+    d.frameTimeDelta = GB_GetFrameInputs()->frame_delta_ms;
     d.preExposure = 1.0f;
     d.reset = reset ? true : false;
-    d.cameraNear = 1.0f;
-    d.cameraFar = 8192.0f;
-    half_h = (viewheight > 0) ? (viewheight * 0.5f) : 100.0f;
-    proj = (float)projection / (float)FRACUNIT;
+    d.cameraNear = GB_TEMPORAL_NEAR;
+    d.cameraFar = GB_TEMPORAL_FAR;
+    half_h = GB_GetFrameInputs()->viewport_height * 0.5f;
+    proj = GB_GetFrameInputs()->base.projection;
     if (proj < 1.0f)
 	proj = 1.0f;
     d.cameraFovAngleVertical = 2.0f * atanf(half_h / proj);
@@ -275,6 +291,11 @@ int Fsr2_Ready(void)
 
 void Fsr2_ApplyRasterJitter(void)
 {
+}
+
+void Fsr2_GetRasterJitter(float *x, float *y)
+{
+    *x = *y = 0.0f;
 }
 
 void Fsr2_RestoreCamera(void)

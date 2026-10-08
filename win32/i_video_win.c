@@ -6,26 +6,41 @@
 #define WIN32_LEAN_AND_MEAN
 #define COBJMACROS
 #include <windows.h>
+#include <imm.h>
 #include <initguid.h>
 #include <d3d12.h>
 #include <dxgi1_4.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <io.h>
+#include <fcntl.h>
 
 #undef boolean
 
 #include "d_event.h"
 #include "d_main.h"
+#include "doomstat.h"
 #include "i_system.h"
 #include "i_video.h"
 #include "v_video.h"
+#include "w_wad.h"
+#include "z_zone.h"
 #include "gbuffer.h"
 #include "m_argv.h"
 #include "ngx_dlss.h"
+#include "graphics_settings.h"
+#include "nr_control.h"
 #include "anime4k.h"
 #include "fsr2.h"
 #include "png_export.h"
+#include "gpu_timing.h"
+#include "dxr_diagnostic.h"
+#include "dxr_map.h"
+#include "dxr_lighting.h"
+#include "dxr_reflection.h"
+#include "render_adapter.h"
+#include "frame_trace.h"
 
 extern int viewheight;
 extern boolean singletics;
@@ -36,6 +51,10 @@ extern boolean singletics;
 #define FRAME_COUNT 2
 
 static HWND g_hwnd;
+static FILE *g_graphics_trace;
+static unsigned g_graphics_frame, g_nr_epoch;
+static int g_nr_loaded;
+extern char *defaultfile;
 static int g_mouse_grab;
 static int g_mouse_buttons;
 static int g_have_focus = 1;
@@ -53,6 +72,7 @@ static IDXGISwapChain3 *g_swap;
 static ID3D12Resource *g_bb[FRAME_COUNT];
 static ID3D12Resource *g_tex_color;
 static ID3D12Resource *g_tex_depth;
+static ID3D12Resource *g_tex_depth_linear;
 static ID3D12Resource *g_tex_normal;
 static ID3D12Resource *g_tex_velocity;
 static ID3D12Resource *g_tex_out;
@@ -61,6 +81,7 @@ static ID3D12Resource *g_tex_depth_hi;
 static ID3D12Resource *g_tex_velocity_hi;
 static D3D12_RESOURCE_STATES g_st_color;
 static D3D12_RESOURCE_STATES g_st_depth;
+static D3D12_RESOURCE_STATES g_st_depth_linear;
 static D3D12_RESOURCE_STATES g_st_normal;
 static D3D12_RESOURCE_STATES g_st_velocity;
 static D3D12_RESOURCE_STATES g_st_out;
@@ -69,6 +90,7 @@ static D3D12_RESOURCE_STATES g_st_depth_hi;
 static D3D12_RESOURCE_STATES g_st_velocity_hi;
 static ID3D12Resource *g_up_color;
 static ID3D12Resource *g_up_depth;
+static ID3D12Resource *g_up_depth_linear;
 static ID3D12Resource *g_up_normal;
 static ID3D12Resource *g_up_velocity;
 static ID3D12Resource *g_up_color_hi;
@@ -87,6 +109,7 @@ static float g_vel_hi[WIN_W * WIN_H * 2];
 /* -export <dir>: every presented frame -> <dir>\fNNNNNN.png */
 static const char *g_export_dir;
 static int g_export_frame;
+static LARGE_INTEGER g_frame_frequency, g_frame_last;
 static unsigned char g_export_bgr[WIN_W * WIN_H * 3];
 
 static int xlatekey(WPARAM vk)
@@ -190,12 +213,69 @@ static void grab_mouse(int grab)
 	ShowCursor(TRUE);
 }
 
+/* Keep renderer pixels independent of desktop DPI virtualization. These calls
+   affect only this process/owned HWND, never the user's monitor settings. */
+static void configure_window_dpi(void)
+{
+    HMODULE user = GetModuleHandleW(L"user32.dll");
+    typedef BOOL (WINAPI *ContextFn)(HANDLE);
+    ContextFn context = (ContextFn)GetProcAddress(user, "SetProcessDpiAwarenessContext");
+    if (context && context((HANDLE)(intptr_t)-4))
+        fprintf(stderr, "Graphics DPI policy: per-monitor aware v2\n");
+    else if (SetProcessDPIAware())
+        fprintf(stderr, "Graphics DPI policy: system aware fallback\n");
+    else
+        fprintf(stderr, "Graphics DPI policy: existing process policy retained\n");
+}
+static void fit_game_window(HWND window, const RECT *suggested, UINT changed_dpi)
+{
+    HMODULE user = GetModuleHandleW(L"user32.dll");
+    typedef BOOL (WINAPI *AdjustFn)(LPRECT,DWORD,BOOL,DWORD,UINT);
+    typedef UINT (WINAPI *DpiFn)(HWND);
+    AdjustFn adjust = (AdjustFn)GetProcAddress(user, "AdjustWindowRectExForDpi");
+    DpiFn get_dpi = (DpiFn)GetProcAddress(user, "GetDpiForWindow");
+    MONITORINFO monitor = {sizeof(MONITORINFO)};
+    RECT extent = {0,0,WIN_W,WIN_H}, current;
+    DWORD style = (DWORD)GetWindowLongPtrA(window,GWL_STYLE);
+    DWORD extra_style = (DWORD)GetWindowLongPtrA(window,GWL_EXSTYLE);
+    UINT dpi = changed_dpi ? changed_dpi : (get_dpi ? get_dpi(window) : 96);
+    int extra_width,extra_height,width=WIN_W,height=WIN_H,available_width,available_height,x,y;
+    HMONITOR target = suggested ? MonitorFromRect(suggested,MONITOR_DEFAULTTONEAREST) : MonitorFromWindow(window,MONITOR_DEFAULTTONEAREST);
+    if(!GetWindowRect(window,&current) || !GetMonitorInfoA(target,&monitor))return;
+    if(!adjust || !adjust(&extent,style,FALSE,extra_style,dpi))
+        AdjustWindowRectEx(&extent,style,FALSE,extra_style);
+    extra_width=extent.right-extent.left-WIN_W;
+    extra_height=extent.bottom-extent.top-WIN_H;
+    available_width=monitor.rcWork.right-monitor.rcWork.left-extra_width;
+    available_height=monitor.rcWork.bottom-monitor.rcWork.top-extra_height;
+    if(available_width<1 || available_height<1)return;
+    if(width>available_width){width=available_width;height=(int)((long long)WIN_H*width/WIN_W);}
+    if(height>available_height){height=available_height;width=(int)((long long)WIN_W*height/WIN_H);}
+    if(width<1 || height<1)return;
+    x=suggested?suggested->left:current.left;y=suggested?suggested->top:current.top;
+    if(x+width+extra_width>monitor.rcWork.right)x=monitor.rcWork.right-width-extra_width;
+    if(y+height+extra_height>monitor.rcWork.bottom)y=monitor.rcWork.bottom-height-extra_height;
+    if(x<monitor.rcWork.left)x=monitor.rcWork.left;if(y<monitor.rcWork.top)y=monitor.rcWork.top;
+    SetWindowPos(window,NULL,x,y,width+extra_width,height+extra_height,SWP_NOZORDER|SWP_NOACTIVATE);
+}
+
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
     event_t ev;
 
+    if ((msg == WM_KEYDOWN || msg == WM_KEYUP ||
+         msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP) &&
+        M_CheckParm("-input-trace"))
+        fprintf(stderr, "Input window event: message=%u vk=%llu translated=%d previous=%d scan=%u menu=%d tic=%d layout=%p\n",
+                msg, (unsigned long long)wparam, xlatekey(wparam),
+                (int)((lparam >> 30) & 1), (unsigned)((lparam >> 16) & 255),
+                menuactive != 0, gametic, (void *)GetKeyboardLayout(0));
+
     switch (msg)
     {
+      case WM_DPICHANGED:
+        fit_game_window(hwnd, (const RECT *)lparam, HIWORD(wparam));
+        return 0;
       case WM_CLOSE:
 	I_Quit();
 	return 0;
@@ -211,6 +291,16 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
 	grab_mouse(0);
 	return 0;
       case WM_KEYDOWN:
+	if (wparam == VK_F5 && (M_CheckParm("-rt-map-depth") || M_CheckParm("-rt-map-normal")))
+	{
+	    if (!(lparam & (1L << 30))) DxrMap_Toggle();
+	    return 0;
+	}
+	if (wparam == VK_F5 && M_CheckParm("-rt-diagnostic"))
+	{
+	    if (!(lparam & (1L << 30))) DxrDiag_Toggle();
+	    return 0;
+	}
       case WM_SYSKEYDOWN:
 	if (wparam == VK_F1) { GB_SetDebugView(GB_VIEW_COLOR); return 0; }
 	if (wparam == VK_F2) { GB_SetDebugView(GB_VIEW_DEPTH); return 0; }
@@ -641,12 +731,12 @@ static void overlay_hud_on_bb(ID3D12Resource *dst)
     UINT64 total;
     unsigned char *mapped = NULL;
     const unsigned char *color;
-    const float *depth;
+    const unsigned char *mask;
     int sx, sy, x0, x1, dx, dy, x, y;
 
-    color = GB_ColorRGBA();
-    depth = GB_Depth();
-    if (!dst || !color || !depth)
+    color = GB_OverlayRGBA();
+    mask = GB_OverlayMask();
+    if (!dst || !color || !mask)
 	return;
 
     memset(&desc, 0, sizeof(desc));
@@ -677,11 +767,11 @@ static void overlay_hud_on_bb(ID3D12Resource *dst)
 	while (sx < GB_WIDTH)
 	{
 	    while (sx < GB_WIDTH &&
-		   depth[sy * GB_WIDTH + sx] != 0.0f)
+		   !mask[sy * GB_WIDTH + sx])
 		sx++;
 	    x0 = sx;
 	    while (sx < GB_WIDTH &&
-		   depth[sy * GB_WIDTH + sx] == 0.0f)
+		   mask[sy * GB_WIDTH + sx])
 		sx++;
 	    x1 = sx;
 	    if (x1 <= x0)
@@ -721,92 +811,15 @@ static void overlay_hud_on_bb(ID3D12Resource *dst)
     ID3D12Resource_Unmap(g_up_present, 0, NULL);
 }
 
-static void blit_statusbar(ID3D12Resource *dst)
-{
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp;
-    D3D12_TEXTURE_COPY_LOCATION dst_loc;
-    D3D12_TEXTURE_COPY_LOCATION src_loc;
-    D3D12_RESOURCE_DESC desc;
-    D3D12_BOX box;
-    UINT num_rows;
-    UINT64 row_size;
-    UINT64 total;
-    unsigned char *mapped = NULL;
-    const unsigned char *color;
-    int x, y, sx, sy;
-    int st_y = GB_HEIGHT - 32;
-    int dst_y;
-
-    if (!dst || viewheight <= 0 || viewheight >= GB_HEIGHT)
-	return;
-    /* Status bar is ST_Y=168, not viewheight (144). 3D sits at
-     * viewwindowy..viewwindowy+viewheight-1 (12..155 at screenblocks 9). */
-    st_y = SCREENHEIGHT - 32;
-    dst_y = st_y * WIN_SCALE;
-    if (dst_y >= WIN_H)
-	return;
-    color = GB_ColorRGBA();
-    if (!color)
-	return;
-
-    memset(&desc, 0, sizeof(desc));
-    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    desc.Width = WIN_W;
-    desc.Height = WIN_H;
-    desc.DepthOrArraySize = 1;
-    desc.MipLevels = 1;
-    desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    desc.SampleDesc.Count = 1;
-    desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-    ID3D12Device_GetCopyableFootprints(g_dev, &desc, 0, 1, 0,
-				       &fp, &num_rows, &row_size, &total);
-    if (FAILED(ID3D12Resource_Map(g_up_present, 0, NULL, (void **)&mapped)))
-	return;
-
-    for (y = dst_y; y < WIN_H; y++)
-    {
-	sy = y / WIN_SCALE;
-	for (x = 0; x < WIN_W; x++)
-	{
-	    const unsigned char *s;
-	    unsigned char *d;
-
-	    sx = x / WIN_SCALE;
-	    s = color + (sy * GB_WIDTH + sx) * 4;
-	    d = mapped + fp.Offset + (UINT)y * fp.Footprint.RowPitch +
-		(UINT)x * 4;
-	    d[0] = s[2];
-	    d[1] = s[1];
-	    d[2] = s[0];
-	    d[3] = 255;
-	}
-    }
-    memset(&dst_loc, 0, sizeof(dst_loc));
-    dst_loc.pResource = dst;
-    dst_loc.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    memset(&src_loc, 0, sizeof(src_loc));
-    src_loc.pResource = g_up_present;
-    src_loc.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-    src_loc.PlacedFootprint = fp;
-    box.left = 0;
-    box.top = (UINT)dst_y;
-    box.front = 0;
-    box.right = WIN_W;
-    box.bottom = WIN_H;
-    box.back = 1;
-    ID3D12GraphicsCommandList_CopyTextureRegion(
-	g_cmd, &dst_loc, 0, (UINT)dst_y, 0, &src_loc, &box);
-    ID3D12Resource_Unmap(g_up_present, 0, NULL);
-}
-
 static void nearest_upscale_ngx(void)
 {
     const unsigned char *color = GB_ColorRGBA();
-    const float *depth = GB_Depth();
+    const float *depth = GB_TemporalDepth();
+    const unsigned char *scene = GB_SceneMask();
     const float *vel = GB_VelocityRG();
     int x, y;
 
-    if (!color || !depth || !vel)
+    if (!color || !depth || !vel || !scene)
 	return;
     for (y = 0; y < WIN_H; y++)
     {
@@ -822,9 +835,9 @@ static void nearest_upscale_ngx(void)
 	    g_color_hi[di * 4 + 1] = color[si * 4 + 1];
 	    g_color_hi[di * 4 + 2] = color[si * 4 + 2];
 	    g_color_hi[di * 4 + 3] = 255;
-	    if (depth[si] <= 0.0f)
+	    if (!scene[si])
 	    {
-		g_depth_hi[di] = 0.0f;
+		g_depth_hi[di] = 1.0f;
 		g_vel_hi[di * 2 + 0] = 0.0f;
 		g_vel_hi[di * 2 + 1] = 0.0f;
 		continue;
@@ -870,8 +883,7 @@ static void init_d3d(HWND hwnd)
     if (FAILED(hr))
 	I_Error("CreateDXGIFactory2 failed (0x%08lx)", (unsigned long)hr);
 
-    hr = D3D12CreateDevice(NULL, D3D_FEATURE_LEVEL_11_0,
-			   &IID_ID3D12Device, (void **)&g_dev);
+    hr = Render_CreateDevice(factory, &g_dev);
     if (FAILED(hr))
 	I_Error("D3D12CreateDevice failed (0x%08lx)", (unsigned long)hr);
 
@@ -962,6 +974,86 @@ static void init_d3d(HWND hwnd)
 	I_Error("G-buffer textures failed");
 }
 
+/* All callers are after the renderer queue fence. Optional resources never
+   own the completed RT/native color and cannot terminate the game. */
+static void release_hi_res(void) {
+ if(g_tex_color_hi)ID3D12Resource_Release(g_tex_color_hi);g_tex_color_hi=NULL;
+ if(g_tex_depth_hi)ID3D12Resource_Release(g_tex_depth_hi);g_tex_depth_hi=NULL;
+ if(g_tex_velocity_hi)ID3D12Resource_Release(g_tex_velocity_hi);g_tex_velocity_hi=NULL;
+ if(g_up_color_hi)ID3D12Resource_Release(g_up_color_hi);g_up_color_hi=NULL;
+ if(g_up_depth_hi)ID3D12Resource_Release(g_up_depth_hi);g_up_depth_hi=NULL;
+ if(g_up_velocity_hi)ID3D12Resource_Release(g_up_velocity_hi);g_up_velocity_hi=NULL;
+}
+static void prepare_ngx_optional(void) {
+ if(Ngx_WantsLinearDepth()&&!g_tex_depth_linear) {
+  g_st_depth_linear=D3D12_RESOURCE_STATE_COPY_DEST;
+  g_tex_depth_linear=make_tex(GB_WIDTH,GB_HEIGHT,DXGI_FORMAT_R32_FLOAT,D3D12_RESOURCE_FLAG_NONE,g_st_depth_linear,L"GB_LinearDepthLegacyRR");
+  g_up_depth_linear=make_upload(upload_bytes(GB_WIDTH,GB_HEIGHT,4));
+  if(!g_tex_depth_linear||!g_up_depth_linear){
+   if(g_tex_depth_linear)ID3D12Resource_Release(g_tex_depth_linear);
+   if(g_up_depth_linear)ID3D12Resource_Release(g_up_depth_linear);
+   g_tex_depth_linear=g_up_depth_linear=NULL;
+   fprintf(stderr,"NGX optional linear depth failed; legacy RR falls back to SR\n");
+  }
+ }
+ if(Ngx_WantsHiRes()&&!g_tex_depth_hi) {
+  if(Ngx_DiagnosticFailure("hires")||!init_hi_res()){
+   release_hi_res();Ngx_CarrierUnavailable();
+   fprintf(stderr,"NGX optional carrier buffers failed; completed SR/RT/native retained\n");
+  }
+ }
+}
+static void apply_graphics_requests(void) {
+ unsigned changes=Graphics_TakePending();NrControlStatus nr;
+ NrControl_Poll();nr=NrControl_GetStatus();
+ if(nr.epoch!=g_nr_epoch){g_nr_epoch=nr.epoch;GB_RequestResetReason(GB_RESET_EXPLICIT);}
+ if(changes&1u){int enabled=Graphics_Get(GRAPHICS_RT).requested;
+  if(enabled)DxrMap_AllowGameplay();
+  DxrLighting_RequestEnabled(enabled&&!M_CheckParm("-rt-light-off"));
+  DxrReflection_RequestEnabled(enabled&&!M_CheckParm("-rt-reflections-off"));
+ }
+ if(changes&2u){Ngx_Shutdown();if(Graphics_Get(GRAPHICS_SR).requested)Ngx_Init(g_dev,g_queue);}
+ if(changes&4u)NrControl_Request(Graphics_Get(GRAPHICS_NR).requested);
+ if((changes&6u)||nr.loaded!=g_nr_loaded){g_nr_loaded=nr.loaded;Ngx_SetCarrierRequested(Graphics_Get(GRAPHICS_NR).requested);prepare_ngx_optional();}
+ if(changes){GB_RequestResetReason(GB_RESET_EXPLICIT);fprintf(stderr,"Graphics applied: tic=%d mask=%u after_gpu_fence=1\n",gametic,changes);}
+}
+static const char *ngx_reason(const char *reason) {
+ if(strstr(reason,"runtime"))return "graphics.reason.runtime";
+ if(strstr(reason,"capability")||strstr(reason,"driver"))return "graphics.reason.capability";
+ if(strstr(reason,"create"))return "graphics.reason.create";
+ if(strstr(reason,"evaluate"))return "graphics.reason.evaluate";
+ return "graphics.reason.init";
+}
+static void record_graphics(int light,int reflection,int ngx,int reset) {
+ GraphicsStatus rt,sr,nr;DxrLightingStatus l=DxrLighting_GetStatus();DxrReflectionStatus r=DxrReflection_GetStatus();
+ NgxStatus n=Ngx_GetStatus();NrControlStatus control=NrControl_GetStatus();const GB_FrameInputs *frame=GB_GetFrameInputs();
+ int scene=GB_HasScenePixels()&&GB_GetDebugView()==GB_VIEW_COLOR;
+ rt=Graphics_Get(GRAPHICS_RT);
+ if(!rt.requested)Graphics_SetActual(GRAPHICS_RT,GRAPHICS_OFF,"graphics.reason.off");
+ else if(!DxrMap_Available())Graphics_SetActual(GRAPHICS_RT,GRAPHICS_UNAVAILABLE,"graphics.reason.no_dxr");
+ else if(!l.available&&!r.available)Graphics_SetActual(GRAPHICS_RT,GRAPHICS_UNAVAILABLE,"graphics.reason.no_effects");
+ else if(!l.requested&&!r.requested)Graphics_SetActual(GRAPHICS_RT,GRAPHICS_OFF,"graphics.reason.effects_disabled");
+ else if(!scene)Graphics_SetActual(GRAPHICS_RT,GRAPHICS_PAUSED,"graphics.reason.non_scene");
+ else if(light||reflection)Graphics_SetActual(GRAPHICS_RT,(l.requested&&!light)||(r.requested&&!reflection)?GRAPHICS_FALLBACK:GRAPHICS_ACTIVE,(l.requested&&!light)||(r.requested&&!reflection)?"graphics.reason.rt_partial":"graphics.reason.none");
+ else Graphics_SetActual(GRAPHICS_RT,GRAPHICS_FALLBACK,"graphics.reason.rt_failed");
+ sr=Graphics_Get(GRAPHICS_SR);
+ if(!sr.requested)Graphics_SetActual(GRAPHICS_SR,GRAPHICS_OFF,"graphics.reason.off");
+ else if(!n.compiled)Graphics_SetActual(GRAPHICS_SR,GRAPHICS_UNAVAILABLE,"graphics.reason.not_compiled");
+ else if(ngx)Graphics_SetActual(GRAPHICS_SR,!strncmp(n.feature,"RR",2)?GRAPHICS_FALLBACK:GRAPHICS_ACTIVE,!strncmp(n.feature,"RR",2)?"graphics.reason.legacy_rr":"graphics.reason.none");
+ else if(!n.ready)Graphics_SetActual(GRAPHICS_SR,GRAPHICS_FALLBACK,ngx_reason(n.reason));
+ else Graphics_SetActual(GRAPHICS_SR,GRAPHICS_PAUSED,"graphics.reason.non_scene");
+ nr=Graphics_Get(GRAPHICS_NR);
+ if(!control.loaded)Graphics_SetActual(GRAPHICS_NR,nr.requested?GRAPHICS_UNAVAILABLE:GRAPHICS_OFF,nr.requested?"graphics.reason.backend_missing":"graphics.reason.off");
+ else if(control.pending)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_PENDING,control.reason);
+ else if(!control.supported)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_UNKNOWN,control.reason);
+ else if(control.confirmed!=nr.requested)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_UNKNOWN,"graphics.reason.confirmation_failed");
+ else if(!nr.requested)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_OFF,"graphics.reason.off");
+ else if(control.execution_verified)Graphics_SetActual(GRAPHICS_NR,GRAPHICS_ACTIVE,"graphics.reason.none");
+ else Graphics_SetActual(GRAPHICS_NR,GRAPHICS_UNVERIFIED,!sr.requested?"graphics.reason.no_input":(strcmp(n.carrier_reason,"none")?(!strcmp(n.carrier_reason,"hires-allocation-failed")?"graphics.reason.hires":"graphics.reason.carrier"):"graphics.reason.execution_unverified"));
+ rt=Graphics_Get(GRAPHICS_RT);sr=Graphics_Get(GRAPHICS_SR);nr=Graphics_Get(GRAPHICS_NR);g_graphics_frame++;
+ if(g_graphics_trace){fprintf(g_graphics_trace,"%u,%d,%d,%d,%d,%s,%s,%s,%s,%s,%s,%d,%u,%u,%d,%d,%d,%s,%d,%d,%d,%d,%d,%u,%d",g_graphics_frame,gametic,rt.requested,sr.requested,nr.requested,Graphics_StateKey(rt.state),Graphics_StateKey(sr.state),Graphics_StateKey(nr.state),rt.reason,sr.reason,nr.reason,reset,frame->reset_reasons,frame->history_valid,light,reflection,ngx,n.feature,n.carrier_evaluated,control.loaded,control.supported,control.confirmed,control.pending,control.epoch,control.execution_verified);fprintf(g_graphics_trace,",%s,%s,%s",n.carrier_reason,l.reason,r.reason);fputc('\n',g_graphics_trace);fflush(g_graphics_trace);}
+}
+
 void I_StartFrame(void)
 {
     GB_BeginFrame();
@@ -1021,16 +1113,37 @@ void I_FinishUpdate(void)
     int used_ngx = 0;
     int used_a4k = 0;
     int used_fsr2 = 0;
+    int used_rt = 0;
+    int used_reflection = 0;
     int reset;
 
+    {
+        LARGE_INTEGER now;
+        float delta_ms;
+        QueryPerformanceCounter(&now);
+        delta_ms = g_frame_last.QuadPart ? (float)(1000.0 * (double)(now.QuadPart - g_frame_last.QuadPart) / g_frame_frequency.QuadPart) : 1000.0f / TICRATE;
+        g_frame_last = now;
+        if (singletics) delta_ms = 1000.0f / TICRATE;
+        if (delta_ms <= 0.0f) delta_ms = 0.001f;
+        GB_SetFrameTiming(gametic, delta_ms, singletics != 0, menuactive != 0, paused != 0, gameepisode, gamemap);
+    }
+    wait_gpu();
+    GpuTiming_Collect();
+    apply_graphics_requests();
+    Ngx_BeginFrame();
     GB_ConvertColor(screens[0]);
+    DxrMap_DetectChanges();
     GB_EndFrame();
     reset = GB_ConsumeReset();
 
-    wait_gpu();
+    DxrDiag_Prepare();
+    DxrMap_Prepare();
+    DxrLighting_Prepare();
+    DxrReflection_Prepare();
     idx = IDXGISwapChain3_GetCurrentBackBufferIndex(g_swap);
     ID3D12CommandAllocator_Reset(g_alloc);
     ID3D12GraphicsCommandList_Reset(g_cmd, g_alloc, NULL);
+    GpuTiming_Begin(g_cmd, gametic);
 
     barrier(g_tex_color, &g_st_color, D3D12_RESOURCE_STATE_COPY_DEST);
     barrier(g_tex_depth, &g_st_depth, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -1038,13 +1151,31 @@ void I_FinishUpdate(void)
     barrier(g_tex_velocity, &g_st_velocity, D3D12_RESOURCE_STATE_COPY_DEST);
     upload_tex(g_tex_color, g_up_color, GB_ColorRGBA(),
 	       GB_WIDTH, GB_HEIGHT, 4, DXGI_FORMAT_R8G8B8A8_UNORM);
-    upload_tex(g_tex_depth, g_up_depth, GB_Depth(),
+    upload_tex(g_tex_depth, g_up_depth, GB_TemporalDepth(),
 	       GB_WIDTH, GB_HEIGHT, 4, DXGI_FORMAT_R32_FLOAT);
+    if (Ngx_WantsLinearDepth() && g_tex_depth_linear && g_up_depth_linear) {
+        barrier(g_tex_depth_linear, &g_st_depth_linear, D3D12_RESOURCE_STATE_COPY_DEST);
+        upload_tex(g_tex_depth_linear, g_up_depth_linear, GB_Depth(),
+                   GB_WIDTH, GB_HEIGHT, 4, DXGI_FORMAT_R32_FLOAT);
+        barrier(g_tex_depth_linear, &g_st_depth_linear,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    }
     upload_tex(g_tex_normal, g_up_normal, GB_NormalRGBA(),
 	       GB_WIDTH, GB_HEIGHT, 4, DXGI_FORMAT_R8G8B8A8_UNORM);
     upload_tex(g_tex_velocity, g_up_velocity, GB_VelocityRG(),
 	       GB_WIDTH, GB_HEIGHT, 8, DXGI_FORMAT_R32G32_FLOAT);
 
+    GpuTiming_Mark(g_cmd, 1);
+    used_rt = DxrLighting_Evaluate(g_cmd, g_tex_color);
+    GpuTiming_LightingEnd(g_cmd);
+    used_reflection = DxrReflection_Evaluate(g_cmd, g_tex_color);
+    if (!used_reflection) GpuTiming_ReflectionTraceEnd(g_cmd);
+    GpuTiming_ReflectionEnd(g_cmd);
+    if (DxrReflection_NeedsHistoryReset()) {
+        reset = 1;
+        GB_RequestResetReason(GB_RESET_REFLECTION);
+    }
     if (Ngx_Ready() && Ngx_ShowEvalOutput() &&
 	GB_GetDebugView() == GB_VIEW_COLOR &&
 	GB_HasScenePixels())
@@ -1079,7 +1210,7 @@ void I_FinishUpdate(void)
 		    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
 		    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 	    barrier(g_tex_out, &g_st_out, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	    used_ngx = Ngx_EvaluateStack(g_cmd, g_tex_color, g_tex_depth,
+	    used_ngx = Ngx_EvaluateStack(g_cmd, g_tex_color, g_tex_depth, g_tex_depth_linear,
 					g_tex_velocity, g_tex_depth_hi,
 					g_tex_velocity_hi, g_tex_normal,
 					g_tex_out, reset);
@@ -1099,7 +1230,7 @@ void I_FinishUpdate(void)
 		    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
 		    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 	    barrier(g_tex_out, &g_st_out, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	    used_ngx = Ngx_Evaluate(g_cmd, g_tex_color, g_tex_depth,
+	    used_ngx = Ngx_Evaluate(g_cmd, g_tex_color, g_tex_depth, g_tex_depth_linear,
 				    g_tex_velocity, g_tex_normal, g_tex_out,
 				    reset);
 	}
@@ -1127,7 +1258,7 @@ void I_FinishUpdate(void)
     }
 
     if (!used_ngx && !used_fsr2 && Anime4K_Ready() &&
-	GB_GetDebugView() == GB_VIEW_COLOR)
+        GB_GetDebugView() == GB_VIEW_COLOR && GB_HasScenePixels())
     {
 	barrier(g_tex_color, &g_st_color,
 		D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -1135,30 +1266,43 @@ void I_FinishUpdate(void)
 	used_a4k = Anime4K_Evaluate(g_cmd, g_tex_color, g_tex_out);
     }
 
+    DxrReflection_RecordTemporalEvaluation(reset, used_ngx, used_fsr2);
+    Ngx_RecordPresented(used_ngx, used_fsr2 ? "fsr2" :
+                        (used_a4k ? "anime4k-fast" : "nearest"));
+
+    record_graphics(used_rt,used_reflection,used_ngx,reset);
+    FrameTrace_Record(used_ngx, used_fsr2);
+    GpuTiming_Mark(g_cmd, 2);
     if (used_ngx || used_a4k || used_fsr2)
     {
-	int hud_y = (SCREENHEIGHT - 32) * WIN_SCALE;
-
-	uav_barrier(g_tex_out);
-	barrier(g_tex_out, &g_st_out, D3D12_RESOURCE_STATE_COPY_SOURCE);
-	barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_COPY_DEST);
-	if (GB_HudVisible() && hud_y > 0 && hud_y < WIN_H)
-	    copy_tex_rows(g_tex_out, g_bb[idx], 0, (UINT)hud_y);
-	else
-	    copy_tex_to_tex(g_tex_out, g_bb[idx]);
-	if (GB_HudVisible())
-	    blit_statusbar(g_bb[idx]);
+        uav_barrier(g_tex_out);
+        barrier(g_tex_out, &g_st_out, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_COPY_DEST);
+        copy_tex_to_tex(g_tex_out, g_bb[idx]);
+        /* Coverage includes identical-color pixels; weapon/UI never rely on
+         * scene depth or palette difference to classify their visibility. */
+        overlay_hud_on_bb(g_bb[idx]);
+    }
+    else if (used_rt || used_reflection)
+    {
+        barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_COPY_DEST);
+        if (used_reflection) DxrReflection_PresentNearest(g_cmd, g_bb[idx]);
+        else DxrLighting_PresentNearest(g_cmd, g_bb[idx]);
+        overlay_hud_on_bb(g_bb[idx]);
     }
     else
     {
-	GB_ComposePresent(g_present, WIN_W, WIN_H);
-	barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_COPY_DEST);
-	upload_tex(g_bb[idx], g_up_present, g_present,
-		   WIN_W, WIN_H, 4, DXGI_FORMAT_B8G8R8A8_UNORM);
-	if (GB_HudVisible())
-	    blit_statusbar(g_bb[idx]);
+        GB_ComposePresent(g_present, WIN_W, WIN_H);
+        barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_COPY_DEST);
+        upload_tex(g_bb[idx], g_up_present, g_present,
+                   WIN_W, WIN_H, 4, DXGI_FORMAT_B8G8R8A8_UNORM);
     }
 
+    /* Diagnostic intentionally replaces the full view, including 2D overlays. */
+    DxrDiag_Render(g_cmd, g_bb[idx]);
+    /* Real-map diagnostics replace world coverage, preserving #9 overlays. */
+    DxrMap_Render(g_cmd, g_bb[idx]);
+    GpuTiming_Mark(g_cmd, 3);
     if (g_export_dir)
     {
 	barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -1166,6 +1310,7 @@ void I_FinishUpdate(void)
 			   DXGI_FORMAT_B8G8R8A8_UNORM);
     }
     barrier(g_bb[idx], &g_bb_state[idx], D3D12_RESOURCE_STATE_PRESENT);
+    GpuTiming_End(g_cmd);
     ID3D12GraphicsCommandList_Close(g_cmd);
     lists[0] = (ID3D12CommandList *)g_cmd;
     ID3D12CommandQueue_ExecuteCommandLists(g_queue, 1, lists);
@@ -1173,6 +1318,7 @@ void I_FinishUpdate(void)
     if (g_export_dir)
     {
 	wait_gpu();
+	GpuTiming_Collect();
 	export_frame_png();
     }
     IDXGISwapChain3_Present(g_swap, 0, 0);
@@ -1186,6 +1332,7 @@ void I_ReadScreen(byte *scr)
 
 void I_SetPalette(byte *palette)
 {
+    GB_SetRawPaletteRGB(palette,gammatable[usegamma]);
     int i;
     int r, g, b;
 
@@ -1207,10 +1354,18 @@ void I_ShutdownGraphics(void)
     wait_gpu();
     if (g_export_frame > 0)
 	fprintf(stderr, "export: %d frames written\n", g_export_frame);
+    GpuTiming_Collect();
+    GpuTiming_Shutdown();
+    DxrDiag_Shutdown();
+    DxrReflection_Shutdown();
+    DxrLighting_Shutdown();
+    DxrMap_Shutdown();
     Png_Shutdown();
     Anime4K_Shutdown();
     Fsr2_Shutdown();
     Ngx_Shutdown();
+    NrControl_Shutdown();
+    if(g_graphics_trace){fclose(g_graphics_trace);g_graphics_trace=NULL;}
     if (g_readback) ID3D12Resource_Release(g_readback);
     if (g_up_present) ID3D12Resource_Release(g_up_present);
     if (g_up_velocity_hi) ID3D12Resource_Release(g_up_velocity_hi);
@@ -1219,6 +1374,7 @@ void I_ShutdownGraphics(void)
     if (g_up_velocity) ID3D12Resource_Release(g_up_velocity);
     if (g_up_normal) ID3D12Resource_Release(g_up_normal);
     if (g_up_depth) ID3D12Resource_Release(g_up_depth);
+    if (g_up_depth_linear) ID3D12Resource_Release(g_up_depth_linear);
     if (g_up_color) ID3D12Resource_Release(g_up_color);
     if (g_tex_velocity_hi) ID3D12Resource_Release(g_tex_velocity_hi);
     if (g_tex_depth_hi) ID3D12Resource_Release(g_tex_depth_hi);
@@ -1227,6 +1383,7 @@ void I_ShutdownGraphics(void)
     if (g_tex_velocity) ID3D12Resource_Release(g_tex_velocity);
     if (g_tex_normal) ID3D12Resource_Release(g_tex_normal);
     if (g_tex_depth) ID3D12Resource_Release(g_tex_depth);
+    if (g_tex_depth_linear) ID3D12Resource_Release(g_tex_depth_linear);
     if (g_tex_color) ID3D12Resource_Release(g_tex_color);
     if (g_bb[0]) ID3D12Resource_Release(g_bb[0]);
     if (g_bb[1]) ID3D12Resource_Release(g_bb[1]);
@@ -1238,6 +1395,7 @@ void I_ShutdownGraphics(void)
     if (g_fence_ev) CloseHandle(g_fence_ev);
     if (g_dev) ID3D12Device_Release(g_dev);
     g_readback = g_up_present = g_up_velocity = g_up_normal = g_up_depth = g_up_color = NULL;
+    g_up_depth_linear = g_tex_depth_linear = NULL;
     g_up_velocity_hi = g_up_depth_hi = g_up_color_hi = NULL;
     g_tex_out = g_tex_velocity = g_tex_normal = g_tex_depth = g_tex_color = NULL;
     g_tex_velocity_hi = g_tex_depth_hi = g_tex_color_hi = NULL;
@@ -1254,7 +1412,18 @@ void I_ShutdownGraphics(void)
 	DestroyWindow(g_hwnd);
 	g_hwnd = NULL;
     }
+    FrameTrace_Shutdown();
     GB_Shutdown();
+}
+
+static void log_window_metrics(void) {
+ RECT client,window;MONITORINFO monitor={sizeof(MONITORINFO)};HMODULE user=GetModuleHandleW(L"user32.dll");
+ typedef UINT (WINAPI *DpiFn)(HWND);typedef HANDLE (WINAPI *WindowContextFn)(HWND);
+ typedef HANDLE (WINAPI *ThreadContextFn)(void);typedef int (WINAPI *AwarenessFn)(HANDLE);
+ DpiFn dpi=(DpiFn)GetProcAddress(user,"GetDpiForWindow");WindowContextFn context=(WindowContextFn)GetProcAddress(user,"GetWindowDpiAwarenessContext");
+ ThreadContextFn thread=(ThreadContextFn)GetProcAddress(user,"GetThreadDpiAwarenessContext");AwarenessFn awareness=(AwarenessFn)GetProcAddress(user,"GetAwarenessFromDpiAwarenessContext");
+ GetClientRect(g_hwnd,&client);GetWindowRect(g_hwnd,&window);GetMonitorInfoA(MonitorFromWindow(g_hwnd,MONITOR_DEFAULTTONEAREST),&monitor);
+ fprintf(stderr,"Graphics window metrics: client=%ldx%ld window=(%ld,%ld,%ld,%ld) workarea=(%ld,%ld,%ld,%ld) window_dpi=%u window_awareness=%d thread_awareness=%d process_legacy_dpi_aware=%d engine=%dx%d (caller-coordinate metrics; external DPI-aware capture may differ)\n",client.right,client.bottom,window.left,window.top,window.right,window.bottom,monitor.rcWork.left,monitor.rcWork.top,monitor.rcWork.right,monitor.rcWork.bottom,dpi?dpi(g_hwnd):0,context&&awareness?awareness(context(g_hwnd)):-1,thread&&awareness?awareness(thread()):-1,IsProcessDPIAware()!=0,WIN_W,WIN_H);
 }
 
 void I_InitGraphics(void)
@@ -1263,13 +1432,29 @@ void I_InitGraphics(void)
     RECT rc;
     DWORD style;
 
+    configure_window_dpi();
+    QueryPerformanceFrequency(&g_frame_frequency);
+    g_frame_last.QuadPart = 0;
     GB_Init();
+    GB_SetBasePaletteRGB(W_CacheLumpName("PLAYPAL",PU_CACHE));
+    {
+        int p = M_CheckParm("-frame-inputs");
+        if (p && p + 1 < myargc) FrameTrace_Init(myargv[p + 1]);
+    }
     if (M_CheckParm("-depth"))
 	GB_SetDebugView(GB_VIEW_DEPTH);
     else if (M_CheckParm("-normal"))
 	GB_SetDebugView(GB_VIEW_NORMAL);
     else if (M_CheckParm("-velocity"))
 	GB_SetDebugView(GB_VIEW_VELOCITY);
+    else if (M_CheckParm("-scene-mask"))
+        GB_SetDebugView(GB_VIEW_SCENE_MASK);
+    else if (M_CheckParm("-overlay-mask"))
+        GB_SetDebugView(GB_VIEW_OVERLAY_MASK);
+    else if (M_CheckParm("-albedo"))
+        GB_SetDebugView(GB_VIEW_ALBEDO);
+    else if (M_CheckParm("-material-mask"))
+        GB_SetDebugView(GB_VIEW_MATERIAL_MASK);
     else if (M_CheckParm("-color"))
 	GB_SetDebugView(GB_VIEW_COLOR);
 
@@ -1311,17 +1496,54 @@ void I_InitGraphics(void)
     if (!g_hwnd)
 	I_Error("CreateWindow failed");
 
+    /* This legacy game's input is virtual-key driven, including ASCII menu,
+       save-name and chat input. IME composition otherwise replaces ordinary
+       keydowns with VK_PROCESSKEY before WndProc sees them. Detach only this
+       owned HWND; leave the user's HKL and every other window unchanged. */
+    ImmAssociateContext(g_hwnd, NULL);
+    fit_game_window(g_hwnd, NULL, 0);
+
     init_d3d(g_hwnd);
-    if (Ngx_Wanted())
-	Ngx_Init(g_dev, g_queue);
-    if (Ngx_WantsHiRes() && !init_hi_res())
-	I_Error("NGX hi-res G-buffers failed");
+    DxrDiag_Init(g_dev, g_queue, WIN_W, WIN_H,
+                 M_CheckParm("-rt-diagnostic") != 0 && !M_CheckParm("-rt-map-depth") && !M_CheckParm("-rt-map-normal"), M_CheckParm("-nort") != 0);
+    DxrMap_Init(g_dev, g_queue, WIN_W, WIN_H,
+                M_CheckParm("-rt-map-normal") ? 2 : (M_CheckParm("-rt-map-depth") ? 1 : 0), M_CheckParm("-nort") != 0);
+    DxrLighting_Init(g_dev, WIN_W, WIN_H);
+    DxrReflection_Init(g_dev, WIN_W, WIN_H);
+    {
+      unsigned defaults=Ngx_Compiled()?2u:0u,cli_mask=0,cli_values=0;
+      if(Ngx_DefaultNr())defaults|=4u;
+      if(M_CheckParm("-rt")||M_CheckParm("-rt-light")||M_CheckParm("-rt-materials")){cli_mask|=1;cli_values|=1;}
+      if(M_CheckParm("-nort")){cli_mask|=1;cli_values&=~1u;}
+      if(M_CheckParm("-sr")||M_CheckParm("-dlss")){cli_mask|=2;cli_values|=2;}
+      if(M_CheckParm("-nosr")||M_CheckParm("-nodlss")){cli_mask|=2;cli_values&=~2u;}
+      if(M_CheckParm("-nr")){cli_mask|=4;cli_values|=4;}
+      if(M_CheckParm("-nonr")){cli_mask|=4;cli_values&=~4u;}
+      Graphics_Init(defaultfile,defaults,cli_mask,cli_values);
+      apply_graphics_requests(); /* initial queue has no pending work */
+    }
+    {
+      int arg=M_CheckParm("-graphics-stats");
+      if(arg&&arg+1<myargc){HANDLE file=CreateFileA(myargv[arg+1],GENERIC_WRITE,0,NULL,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,NULL);
+       if(file!=INVALID_HANDLE_VALUE){int descriptor=_open_osfhandle((intptr_t)file,_O_WRONLY|_O_TEXT);
+        if(descriptor>=0){g_graphics_trace=_fdopen(descriptor,"w");if(!g_graphics_trace)_close(descriptor);}else CloseHandle(file);
+       }
+       else fprintf(stderr,"Graphics observer refuses existing/unavailable path\n");
+       if(g_graphics_trace)fprintf(g_graphics_trace,"frame,game_tic,rt_requested,sr_requested,nr_requested,rt_state,sr_state,nr_state,rt_reason,sr_reason,nr_reason,temporal_reset,frame_reset_reasons,history_valid,light_evaluated,reflection_evaluated,ngx_evaluated,ngx_feature,carrier_evaluated,consumer_loaded,control_supported,control_confirmed,control_pending,control_epoch,nr_execution_verified,carrier_reason,lighting_reason,reflection_reason\n");
+      }
+    }
     if (!Ngx_Ready() && Fsr2_Wanted())
 	Fsr2_Init(g_dev);
     if (!Ngx_Ready() && !Fsr2_Ready())
 	Anime4K_Init(g_dev);
+    {
+        int timing_arg = M_CheckParm("-gpu-timing");
+        if (timing_arg && timing_arg < myargc - 1)
+            GpuTiming_Init(g_dev, g_queue, myargv[timing_arg + 1], g_export_dir != NULL);
+    }
     ShowWindow(g_hwnd, SW_SHOW);
     UpdateWindow(g_hwnd);
+    log_window_metrics();
     grab_mouse(1);
     fprintf(stderr, "I_InitGraphics: D3D12CreateDevice %dx%d (internal %dx%d)\n",
 	    WIN_W, WIN_H, SCREENWIDTH, SCREENHEIGHT);
@@ -1329,10 +1551,8 @@ void I_InitGraphics(void)
 	fprintf(stderr, "present mode: anime4k-fast\n");
     else if (Fsr2_Ready())
 	fprintf(stderr, "present mode: fsr2\n");
-    else if (Ngx_WantsHiRes())
-	fprintf(stderr, "present mode: dlss5-stack\n");
     else if (Ngx_Ready())
-	fprintf(stderr, "present mode: dlss-upscale\n");
+	fprintf(stderr, "present mode: ngx-pending (evaluation not yet attempted)\n");
     else
 	fprintf(stderr, "present mode: nearest\n");
 }

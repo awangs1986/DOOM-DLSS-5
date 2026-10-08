@@ -13,6 +13,7 @@
 #undef boolean
 #include "m_argv.h"
 #include "d_main.h"
+#include "language.h"
 
 static char *dupstr(const char *s)
 {
@@ -109,6 +110,28 @@ static void setup_env(void)
     if (try_set_waddir(repo))
 	return;
     try_set_waddir(".");
+}
+
+/* Called after response-file arguments are expanded. */
+void Lang_InitGame(void)
+{
+    char exe[4096];
+    char *slash;
+    DWORD length = GetModuleFileNameA(NULL, exe, sizeof(exe));
+    int arg = M_CheckParm("-lang");
+    const char *selection = NULL;
+    if (arg) selection = arg + 1 < myargc ? myargv[arg + 1] : "";
+    if (!length || length >= sizeof(exe)) {
+        Lang_Startup(NULL, selection);
+        return;
+    }
+    slash = strrchr(exe, '\\');
+    if (!slash) {
+        Lang_Startup(NULL, selection);
+        return;
+    }
+    *slash = 0;
+    Lang_Startup(exe, selection);
 }
 
 int main(int argc, char **argv)
